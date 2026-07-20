@@ -1,0 +1,181 @@
+:root {
+  color-scheme: dark;
+  --bg: #071421;
+  --card: #0e2330;
+  --text: #e6f2ff;
+  --muted: #9fb6cf;
+  --border: rgba(255,255,255,0.06);
+  --gene: #2e9f57;
+  --gene-glow: rgba(46, 159, 87, 0.12);
+  --peak: #3b82f6;
+  --peak-glow: rgba(59, 130, 246, 0.12);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", Roboto, Arial, sans-serif;
+  background: linear-gradient(135deg, #03121a 0%, var(--bg) 100%);
+  color: var(--text);
+}
+
+.app-shell {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.78rem;
+  color: #4b7cb8;
+  font-weight: 700;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: clamp(1.4rem, 2vw, 2rem);
+}
+
+.subtext {
+  margin: 0;
+  max-width: 820px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.legend {
+  display: flex;
+  gap: 14px;
+  background: rgba(255,255,255,0.03);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.6);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.legend-swatch.gene { background: var(--gene); }
+.legend-swatch.peak { background: var(--peak); }
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.button-group {
+  display: flex;
+  gap: 10px;
+}
+
+button {
+  border: none;
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: var(--card);
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(2, 6, 23, 0.6);
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+.status {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.chart-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), var(--card));
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.6);
+}
+
+.chart-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(10,20,30,0.6) 0%, rgba(14,35,48,0.85) 100%);
+  scrollbar-width: thin;
+  scrollbar-color: #5b88b0 rgba(0,0,0,0.35);
+  position: relative;
+}
+
+.chart-scroll::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(255,255,255,0.03), transparent 10%, transparent 90%, rgba(255,255,255,0.03));
+}
+
+svg {
+  display: block;
+  min-width: 0;
+  height: 520px;
+}
+
+.axis-label {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tick-label {
+  fill: rgba(230,242,255,0.82);
+  font-size: 11px;
+}
+
+.gene-bar {
+  fill: var(--gene);
+  opacity: 0.92;
+}
+
+.peak-bar {
+  fill: var(--peak);
+  opacity: 0.9;
+}
+
+.gene-label, .peak-label {
+  font-size: 11px;
+  fill: var(--text);
+}
+
+.axis-line,
+.grid-line {
+  stroke: rgba(255,255,255,0.06);
+  stroke-width: 1;
+}
