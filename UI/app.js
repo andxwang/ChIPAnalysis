@@ -1,6 +1,3 @@
-const genesPath = '../MabATCC19977_gff.gff';
-const peaksPath = '../SigHP1/SigHP1_FDR0.01combo.gff';
-
 const svg = document.getElementById('chart');
 const status = document.getElementById('status');
 const container = document.getElementById('chart-container');
@@ -22,10 +19,18 @@ function getMaxCoord() {
   );
 }
 
-async function loadData() {
+async function loadDataFromFiles() {
+  const genesFile = document.getElementById("genes-file").files[0];
+  const peaksFile = document.getElementById("peaks-file").files[0];
+
+  if (!genesFile || !peaksFile) {
+    status.textContent = "Please select both files first.";
+    return;
+  }
+
   const [genesText, peaksText] = await Promise.all([
-    fetch(genesPath).then((res) => res.text()),
-    fetch(peaksPath).then((res) => res.text()),
+    genesFile.text(),
+    peaksFile.text(),
   ]);
 
   state.genes = parseGenes(genesText);
@@ -322,4 +327,6 @@ container.addEventListener('scroll', () => {
   }
 });
 
-loadData();
+document
+  .getElementById("load-files")
+  .addEventListener("click", loadDataFromFiles);

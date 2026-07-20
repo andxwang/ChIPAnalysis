@@ -4,16 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ChIP Genome Viewer</title>
-    <link rel="stylesheet" href="styles.css?v=2" />
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <header class="hero">
         <div>
           <p class="eyebrow">Interactive genome browser preview</p>
-          <h1>Mab genes and SigHP1 peaks</h1>
+          <h1>CHiP Analysis</h1>
           <p class="subtext">
-            Green bars show genes from the Mab annotation; blue bars show SigHP1 peaks.
+            Green bars show genes from the Mab annotation; blue bars show peaks.
             Scroll horizontally to explore the coordinate system and use the zoom controls to inspect regions closely.
           </p>
         </div>
@@ -37,7 +37,22 @@
           <button id="zoom-out" type="button">Zoom out</button>
           <button id="reset" type="button">Reset view</button>
         </div>
-        <div id="status" class="status">Loading genome tracks…</div>
+
+        <div class="upload-group">
+          <label>
+            Gene GFF:
+            <input id="genes-file" type="file" accept=".gff,.txt">
+          </label>
+
+          <label>
+            Peak GFF:
+            <input id="peaks-file" type="file" accept=".gff,.txt">
+          </label>
+
+          <button id="load-files" type="button">Load files</button>
+        </div>
+
+        <div id="status" class="status">Please upload gene and peak files.</div>        
       </section>
 
       <section class="chart-card">
@@ -47,6 +62,6 @@
       </section>
     </div>
 
-    <script src="app.js?v=13"></script>
+    <script src="app.js"></script>
   </body>
 </html>
