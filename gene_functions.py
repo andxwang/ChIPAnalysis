@@ -94,28 +94,30 @@ def is_in_last_third(peak_start, peak_end, gene_start, gene_end):
     return overlap_end > overlap_start and overlap_end > last_third_start
 
 
+def is_regulating_gene(peak_start, peak_end, gene_row, proximity=600):
+    direction = gene_row["direction"]
+    gene_start = gene_row["gene_start"]
+    gene_end = gene_row["gene_end"]
+
+    if direction == "+":
+        in_first_third = is_in_first_third(peak_start, peak_end, gene_start, gene_end)
+        near_left_boundary = abs(peak_start - gene_start) <= proximity
+        return in_first_third or (near_left_boundary and peak_end <= gene_start)
+
+    if direction == "-":
+        in_last_third = is_in_last_third(peak_start, peak_end, gene_start, gene_end)
+        near_right_boundary = abs(peak_end - gene_end) <= proximity
+        return in_last_third or (near_right_boundary and peak_start >= gene_end)
+
+    return False
+
+
 def find_regulated_genes(peak_start, peak_end, genes, proximity=600):
-    candidates = []
-
-    for _, row in genes.iterrows():  # TODO: use binary search or something more efficient
-        if row["direction"] == "+":  # forward
-            in_first_third = is_in_first_third(
-                peak_start, peak_end, row["gene_start"], row["gene_end"]
-            )
-            near_left_boundary = abs(peak_start - row["gene_start"]) <= proximity
-            # near boundary should only be checked if the peak is in front of the gene
-            if in_first_third or (near_left_boundary and peak_end <= row['gene_start']):
-                candidates.append(row["gene_name"])
-
-        if row["direction"] == "-":  # backward
-            if row['gene_name'] == 'MAB_0495c':
-                print(f"Checking gene {row['gene_name']} with peak ({peak_start}, {peak_end})")
-            in_last_third = is_in_last_third(
-                peak_start, peak_end, row["gene_start"], row["gene_end"]
-            )
-            near_right_boundary = abs(peak_end - row["gene_end"]) <= proximity
-            if in_last_third or (near_right_boundary and peak_start >= row['gene_end']):
-                candidates.append(row["gene_name"])
+    candidates = [
+        row["gene_name"]
+        for _, row in genes.iterrows()
+        if is_regulating_gene(peak_start, peak_end, row, proximity=proximity)
+    ]
 
     if not candidates:
         return "-"
@@ -123,7 +125,79 @@ def find_regulated_genes(peak_start, peak_end, genes, proximity=600):
     return "/".join(candidates)
 
 
-def annotate_peaks(peaks_df, mab_df):
+def find_operon(peak_start, peak_end, genes, operon_gap=30):
+    """
+    Return the operon overlapped by the peak.
+
+    An operon is defined as a chain of >=2 adjacent genes where every
+    neighboring pair:
+      - is separated by <= operon_gap coordinates, and
+      - has the same direction (+/-).
+
+    The peak must overlap at least one gene in the operon.
+
+    Returns
+    -------
+    str
+        "<first gene> - <last gene>" if an operon is found,
+        otherwise "-".
+    """
+
+    overlapping = genes[
+        (genes["gene_start"] <= peak_end) &
+        (genes["gene_end"] >= peak_start)
+    ]
+
+    if overlapping.empty:
+        return "-"
+
+    operon_indices = set()
+
+    for idx in overlapping.index:
+        cluster = [idx]
+        direction = genes.iloc[idx]["direction"]
+
+        # Expand left
+        left = idx
+        while left > 0:
+            prev = genes.iloc[left - 1]
+            curr = genes.iloc[left]
+
+            gap = curr["gene_start"] - prev["gene_end"]
+
+            if gap <= operon_gap and prev["direction"] == direction:
+                cluster.insert(0, left - 1)
+                left -= 1
+            else:
+                break
+
+        # Expand right
+        right = idx
+        while right < len(genes) - 1:
+            curr = genes.iloc[right]
+            nxt = genes.iloc[right + 1]
+
+            gap = nxt["gene_start"] - curr["gene_end"]
+
+            if gap <= operon_gap and nxt["direction"] == direction:
+                cluster.append(right + 1)
+                right += 1
+            else:
+                break
+
+        if len(cluster) >= 2:
+            operon_indices.update(cluster)
+
+    if not operon_indices:
+        return "-"
+
+    operon_indices = sorted(operon_indices)
+    first_gene = genes.iloc[operon_indices[0]]["gene_name"]
+    last_gene = genes.iloc[operon_indices[-1]]["gene_name"]
+
+    return f"{first_gene} - {last_gene}"
+
+def annotate_peaks(peaks_df, mab_df, proximity=600, operon_gap=30):
     tqdm.pandas()
     genes = build_gene_table(mab_df)
 
@@ -135,7 +209,14 @@ def annotate_peaks(peaks_df, mab_df):
         axis=1,
     )
     result["Gene(s) Regulated"] = result.progress_apply(
-        lambda row: find_regulated_genes(row["P1"], row["P2"], genes),
+        lambda row: find_regulated_genes(row["P1"], row["P2"], genes, proximity=proximity),
+        axis=1,
+    )
+    result['comments'] = pd.qcut(result['Score'], q=5, labels=['no real peak', 'small', 'medium', 'large', 'very large'])
+    result["Operon"] = result.progress_apply(
+        lambda row: find_operon(
+            row["P1"], row["P2"], genes, operon_gap=operon_gap
+        ),
         axis=1,
     )
     return result
