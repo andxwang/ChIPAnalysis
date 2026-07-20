@@ -1,4 +1,8 @@
-## Fill in the correct file paths in `config.json`. E.g.:
+## Setup
+
+First, install (keeping simple as of now): `pip install -r requirements.txt`
+
+Fill in the correct file paths in `config.json`. E.g.:
 
 ```json
 {
@@ -29,7 +33,7 @@ ChIPAnalysis/
 │       SigHP2_FDR0.01combo.gff
 ```
 
-To run the analysis:
+## To run the analysis:
 ```bash
 cd ChIPAnalysis/
 python main.py
