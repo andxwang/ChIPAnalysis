@@ -1,0 +1,11 @@
+{
+  "paths": {
+    "genes": "~/Documents/ChIPAnalysis/MabATCC19977_gff.gff",
+    "peaks": "~/Documents/ChIPAnalysis/SigHP1/SigHP1_FDR0.01combo.gff",
+    "output_path": "~/Documents/ChIPAnalysis/regulated_peaks_out.csv"
+  },
+  "analysis": {
+    "proximity": 600,
+    "operon_gap": 30
+  }
+}
