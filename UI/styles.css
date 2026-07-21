@@ -123,6 +123,10 @@ button:hover {
   box-shadow: 0 16px 36px rgba(2, 6, 23, 0.6);
 }
 
+.chart-frame {
+  position: relative;
+}
+
 .chart-scroll {
   overflow-x: auto;
   overflow-y: hidden;
@@ -131,15 +135,21 @@ button:hover {
   background: linear-gradient(180deg, rgba(10,20,30,0.6) 0%, rgba(14,35,48,0.85) 100%);
   scrollbar-width: thin;
   scrollbar-color: #5b88b0 rgba(0,0,0,0.35);
-  position: relative;
 }
 
-.chart-scroll::before {
+.chart-frame::before {
   content: "";
   position: absolute;
   inset: 0;
+  border-radius: 12px;
   pointer-events: none;
-  background: linear-gradient(90deg, rgba(255,255,255,0.03), transparent 10%, transparent 90%, rgba(255,255,255,0.03));
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.03),
+    transparent 10%,
+    transparent 90%,
+    rgba(255,255,255,0.03)
+  );
 }
 
 svg {
