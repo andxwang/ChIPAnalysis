@@ -1,4 +1,5 @@
 import re
+import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 
@@ -17,8 +18,12 @@ def build_gene_table(mab_df):
     genes["gene_start"] = pd.to_numeric(genes["gene_start"], errors="coerce")
     genes["gene_end"] = pd.to_numeric(genes["gene_end"], errors="coerce")
     genes = genes.sort_values(["gene_start", "gene_end"]).reset_index(drop=True)
-    return genes
 
+    return {
+        "genes": genes,
+        "starts": genes["gene_start"].to_numpy(),
+        "ends": genes["gene_end"].to_numpy(),
+    }
 
 def is_intragenic(peak_start, peak_end, gene_start, gene_end):
     return gene_start <= peak_start and peak_end <= gene_end
@@ -112,17 +117,35 @@ def is_regulating_gene(peak_start, peak_end, gene_row, proximity=600):
     return False
 
 
-def find_regulated_genes(peak_start, peak_end, genes, proximity=600):
+def find_regulated_genes(peak_start, peak_end, gene_table, proximity=600):
+    genes = gene_table["genes"]
+    starts = gene_table["starts"]
+    ends = gene_table["ends"]
+
+    candidate_indices = set()
+
+    # Genes whose start is close enough to possibly satisfy overlap or + strand proximity.
+    left = np.searchsorted(starts, peak_start - proximity, side="left")
+    right = np.searchsorted(starts, peak_end + proximity, side="right")
+    candidate_indices.update(range(left, right))
+
+    # Genes whose end is close enough to possibly satisfy overlap or - strand proximity.
+    left = np.searchsorted(ends, peak_start - proximity, side="left")
+    right = np.searchsorted(ends, peak_end + proximity, side="right")
+    candidate_indices.update(range(left, right))
+
     candidates = [
-        row["gene_name"]
-        for _, row in genes.iterrows()
-        if is_regulating_gene(peak_start, peak_end, row, proximity=proximity)
+        genes.iloc[i]["gene_name"]
+        for i in sorted(candidate_indices)
+        if is_regulating_gene(
+            peak_start,
+            peak_end,
+            genes.iloc[i],
+            proximity=proximity,
+        )
     ]
 
-    if not candidates:
-        return "-"
-
-    return "/".join(candidates)
+    return "-" if not candidates else "/".join(candidates)
 
 
 def find_operon(peak_start, peak_end, genes, operon_gap=100, proximity=600):
@@ -224,21 +247,27 @@ def find_operon(peak_start, peak_end, genes, operon_gap=100, proximity=600):
     return f"{first_gene} - {last_gene}"
 
 def annotate_peaks(peaks_df, mab_df, proximity=600, operon_gap=30):
-    tqdm.pandas()
-    genes = build_gene_table(mab_df)
+    gene_table = build_gene_table(mab_df)
+    genes = gene_table["genes"]
 
     result = peaks_df[["start", "end", "score"]].copy()
     result.columns = ["P1", "P2", "Score"]
     result["Paverage"] = (result["P1"] + result["P2"]) / 2
+    
+    tqdm.pandas(desc="Finding peak locations")
     result["Peak Location"] = result.progress_apply(
         lambda row: get_peak_location(row["P1"], row["P2"], genes),
         axis=1,
     )
+    
+    tqdm.pandas(desc=f"Finding regulated genes with proximity={proximity}")
     result["Gene(s) Regulated"] = result.progress_apply(
-        lambda row: find_regulated_genes(row["P1"], row["P2"], genes, proximity=proximity),
+        lambda row: find_regulated_genes(row["P1"], row["P2"], gene_table, proximity=proximity),
         axis=1,
     )
     result['comments'] = pd.qcut(result['Score'], q=5, labels=['no real peak', 'small', 'medium', 'large', 'very large'])
+    
+    tqdm.pandas(desc=f"Finding operons with operon_gap={operon_gap}")
     result["Operon"] = result.progress_apply(
         lambda row: find_operon(
             row["P1"], row["P2"], genes, operon_gap=operon_gap
