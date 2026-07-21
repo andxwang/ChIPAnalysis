@@ -125,16 +125,18 @@ def find_regulated_genes(peak_start, peak_end, genes, proximity=600):
     return "/".join(candidates)
 
 
-def find_operon(peak_start, peak_end, genes, operon_gap=30):
+def find_operon(peak_start, peak_end, genes, operon_gap=100, proximity=600):
     """
-    Return the operon overlapped by the peak.
+    Return the operon associated with a peak.
 
-    An operon is defined as a chain of >=2 adjacent genes where every
-    neighboring pair:
-      - is separated by <= operon_gap coordinates, and
-      - has the same direction (+/-).
+    An operon is a chain of >=2 adjacent genes where every neighboring pair:
+      - is separated by <= operon_gap coordinates
+      - has the same direction
 
-    The peak must overlap at least one gene in the operon.
+    A peak can identify an operon either by:
+      - directly overlapping a gene, or
+      - being within `proximity` of a gene boundary in the gene's
+        transcriptional direction.
 
     Returns
     -------
@@ -143,17 +145,8 @@ def find_operon(peak_start, peak_end, genes, operon_gap=30):
         otherwise "-".
     """
 
-    overlapping = genes[
-        (genes["gene_start"] <= peak_end) &
-        (genes["gene_end"] >= peak_start)
-    ]
-
-    if overlapping.empty:
-        return "-"
-
-    operon_indices = set()
-
-    for idx in overlapping.index:
+    def expand_operon(idx):
+        """Expand from a seed gene index in both directions."""
         cluster = [idx]
         direction = genes.iloc[idx]["direction"]
 
@@ -185,8 +178,41 @@ def find_operon(peak_start, peak_end, genes, operon_gap=30):
             else:
                 break
 
-        if len(cluster) >= 2:
-            operon_indices.update(cluster)
+        return cluster if len(cluster) >= 2 else []
+
+    # First: direct overlap
+    overlapping = genes[
+        (genes["gene_start"] <= peak_end) &
+        (genes["gene_end"] >= peak_start)
+    ]
+
+    seed_indices = list(overlapping.index)
+
+    # need to do this even if no overlap
+    # Candidate genes near the peak boundaries
+    candidates = genes[
+        (abs(genes["gene_start"] - peak_start) <= proximity) |
+        (abs(genes["gene_end"] - peak_end) <= proximity)
+    ]
+
+    # Apply strand-specific regulatory boundary logic
+    for idx, gene in candidates.iterrows():
+        if gene["direction"] == "+":
+            if abs(peak_start - gene["gene_start"]) <= proximity:
+                seed_indices.append(idx)
+
+        elif gene["direction"] == "-":
+            if abs(peak_end - gene["gene_end"]) <= proximity:
+                seed_indices.append(idx)
+
+    if not seed_indices:
+        return "-"
+
+    operon_indices = set()
+
+    for idx in seed_indices:
+        cluster = expand_operon(idx)
+        operon_indices.update(cluster)
 
     if not operon_indices:
         return "-"
