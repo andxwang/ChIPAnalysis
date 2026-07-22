@@ -1,36 +1,56 @@
 :root {
   color-scheme: dark;
-  --bg: #071421;
-  --card: #0e2330;
+  --bg: #111113;
+  --card: #161f46;
+  --card-2: #091b4d;
   --text: #e6f2ff;
   --muted: #9fb6cf;
-  --border: rgba(255,255,255,0.06);
+  --border: rgba(255, 255, 255, 0.08);
   --gene: #2e9f57;
-  --gene-glow: rgba(46, 159, 87, 0.12);
+  --gene-hover: #46c274;
   --peak: #3b82f6;
-  --peak-glow: rgba(59, 130, 246, 0.12);
+  --peak-hover: #6aa5ff;
+  --accent: #4b7cb8;
 }
 
 * { box-sizing: border-box; }
+
 body {
   margin: 0;
   font-family: "Segoe UI", Roboto, Arial, sans-serif;
-  background: linear-gradient(135deg, #03121a 0%, var(--bg) 100%);
+  background: linear-gradient(135deg, #11101d 0%, var(--bg) 100%);
   color: var(--text);
+  min-height: 100vh;
 }
 
+/* The shell itself is full-width. Hero and toolbar are centered via their
+   own max-width so headings stay readable, while the chart card can
+   stretch to fill wide monitors. */
 .app-shell {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 24px;
+  padding: 24px 32px;
 }
+
+.hero,
+.toolbar {
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.chart-card {
+  max-width: 1800px;
+  margin: 0 auto;
+}
+
+/* -------------------------------------------------------------------- Hero */
 
 .hero {
   display: flex;
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
 }
 
 .eyebrow {
@@ -38,7 +58,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.2em;
   font-size: 0.78rem;
-  color: #4b7cb8;
+  color: var(--accent);
   font-weight: 700;
 }
 
@@ -54,14 +74,24 @@ h1 {
   line-height: 1.5;
 }
 
+kbd {
+  font-family: "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.82em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
 .legend {
   display: flex;
   gap: 14px;
-  background: rgba(255,255,255,0.03);
-  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.6);
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.4);
 }
 
 .legend-item {
@@ -81,33 +111,80 @@ h1 {
 .legend-swatch.gene { background: var(--gene); }
 .legend-swatch.peak { background: var(--peak); }
 
+/* ----------------------------------------------------------------- Toolbar */
+
 .toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.toolbar-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin-bottom: 14px;
   flex-wrap: wrap;
 }
 
-.button-group {
+.button-group,
+.upload-group {
   display: flex;
   gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 button {
-  border: none;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 9px 14px;
+  padding: 8px 14px;
   background: var(--card);
   color: var(--text);
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 6px 16px rgba(2, 6, 23, 0.6);
+  transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
 }
 
 button:hover {
-  transform: translateY(-1px);
+  background: var(--card-2);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+button:active { transform: translateY(1px); }
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+
+button.primary:hover {
+  background: #5a8fca;
+}
+
+.file-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.file-label input[type="file"] {
+  color: var(--text);
+  font-size: 0.85rem;
+  max-width: 200px;
+}
+
+.toolbar-readouts {
+  padding: 6px 4px 0;
 }
 
 .status {
@@ -115,12 +192,14 @@ button:hover {
   font-weight: 600;
 }
 
+/* -------------------------------------------------------------------- Chart */
+
 .chart-card {
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), var(--card));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), var(--card));
   border: 1px solid var(--border);
   border-radius: 18px;
   padding: 14px;
-  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.6);
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.5);
 }
 
 .chart-frame {
@@ -132,60 +211,82 @@ button:hover {
   overflow-y: hidden;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(10,20,30,0.6) 0%, rgba(14,35,48,0.85) 100%);
+  background:
+    linear-gradient(90deg, rgba(9, 1, 31, 0.678) 0%, rgba(90, 49, 32, 0.61) 100%);
   scrollbar-width: thin;
-  scrollbar-color: #5b88b0 rgba(0,0,0,0.35);
+  scrollbar-color: #5b88b0 rgba(0, 0, 0, 0.35);
+  overscroll-behavior-x: contain;
 }
 
-.chart-frame::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 12px;
-  pointer-events: none;
-  background: linear-gradient(
-    90deg,
-    rgba(255,255,255,0.03),
-    transparent 10%,
-    transparent 90%,
-    rgba(255,255,255,0.03)
-  );
+.chart-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
-svg {
+.chart-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+.chart-scroll::-webkit-scrollbar-thumb {
+  background: #5b88b0;
+  border-radius: 999px;
+}
+.chart-scroll::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+svg#chart {
   display: block;
-  min-width: 0;
-  height: 520px;
+  height: 340px;
+  /* No min-width / max-width overrides — JS sets the exact pixel width. */
 }
 
 .axis-label {
   fill: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.06em;
 }
 
 .tick-label {
-  fill: rgba(230,242,255,0.82);
+  fill: rgba(230, 242, 255, 0.82);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .gene-bar {
   fill: var(--gene);
-  opacity: 0.92;
+  transition: fill 0.15s ease;
 }
 
 .peak-bar {
   fill: var(--peak);
-  opacity: 0.9;
+  transition: fill 0.15s ease;
 }
 
-.gene-label, .peak-label {
+.feature { cursor: default; }
+.feature:hover .gene-bar { fill: var(--gene-hover); }
+.feature:hover .peak-bar { fill: var(--peak-hover); }
+
+.gene-label,
+.peak-label {
   font-size: 11px;
-  fill: var(--text);
+  fill: #e4e4e4;
+  font-weight: 700;
+  pointer-events: none;
 }
 
-.axis-line,
-.grid-line {
-  stroke: rgba(255,255,255,0.06);
+.axis-line {
+  stroke: rgba(255, 255, 255, 0.25);
   stroke-width: 1;
+}
+
+.grid-line {
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-width: 1;
+}
+
+.hint {
+  margin: 10px 4px 0;
+  color: var(--muted);
+  font-size: 0.82rem;
 }

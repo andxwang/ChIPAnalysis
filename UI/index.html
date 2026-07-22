@@ -11,10 +11,11 @@
       <header class="hero">
         <div>
           <p class="eyebrow">Interactive genome browser preview</p>
-          <h1>CHiP Analysis</h1>
+          <h1>ChIP Analysis</h1>
           <p class="subtext">
-            Green bars show genes from the Mab annotation; blue bars show peaks.
-            Scroll horizontally to explore the coordinate system and use the zoom controls to inspect regions closely.
+            Green bars are genes (+ strand above the axis, &minus; strand below);
+            blue bars are peaks. Scroll horizontally to pan, or hold
+            <kbd>Ctrl</kbd> and scroll to zoom toward the cursor.
           </p>
         </div>
         <div class="legend">
@@ -29,38 +30,49 @@
         </div>
       </header>
 
-      <section class="toolbar">
-        <div class="button-group">
-          <button id="pan-left" type="button">← Pan left</button>
-          <button id="pan-right" type="button">Pan right →</button>
-          <button id="zoom-in" type="button">Zoom in</button>
-          <button id="zoom-out" type="button">Zoom out</button>
-          <button id="reset" type="button">Reset view</button>
+      <section class="toolbar" aria-label="Chart controls">
+        <div class="toolbar-row">
+          <div class="button-group" role="group" aria-label="Navigation">
+            <button id="pan-left" type="button" title="Pan left (←)">← Pan</button>
+            <button id="pan-right" type="button" title="Pan right (→)">Pan →</button>
+            <button id="zoom-out" type="button" title="Zoom out (-)">- Zoom</button>
+            <button id="zoom-in" type="button" title="Zoom in (+)">+ Zoom</button>
+            <button id="reset" type="button" title="Reset view (0)">Reset</button>
+          </div>
+
+          <div class="upload-group">
+            <label class="file-label">
+              <span>Gene GFF</span>
+              <input id="genes-file" type="file" accept=".gff,.txt" />
+            </label>
+            <label class="file-label">
+              <span>Peak GFF</span>
+              <input id="peaks-file" type="file" accept=".gff,.txt" />
+            </label>
+            <button id="load-files" type="button" class="primary">Load files</button>
+          </div>
         </div>
 
-        <div class="upload-group">
-          <label>
-            Gene GFF:
-            <input id="genes-file" type="file" accept=".gff,.txt">
-          </label>
-
-          <label>
-            Peak GFF:
-            <input id="peaks-file" type="file" accept=".gff,.txt">
-          </label>
-
-          <button id="load-files" type="button">Load files</button>
+        <div class="toolbar-row toolbar-readouts">
+          <div id="status" class="status">Please upload gene and peak files.</div>
         </div>
-
-        <div id="status" class="status">Please upload gene and peak files.</div>        
       </section>
 
       <section class="chart-card">
         <div class="chart-frame">
-          <div id="chart-container" class="chart-scroll">
+          <div
+            id="chart-container"
+            class="chart-scroll"
+            tabindex="0"
+            aria-label="Genome coordinate chart. Use arrow keys to pan, plus and minus to zoom."
+          >
             <svg id="chart" role="img" aria-label="Genome coordinate chart"></svg>
           </div>
         </div>
+        <p class="hint">
+          <kbd>←</kbd> <kbd>→</kbd> or scroll to pan · <kbd>+</kbd> <kbd>−</kbd> zoom ·
+          <kbd>0</kbd> reset · <kbd>Ctrl</kbd> + scroll zooms toward the cursor.
+        </p>
       </section>
     </div>
 
