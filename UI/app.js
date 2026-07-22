@@ -21,9 +21,18 @@ const MAX_TOTAL_WIDTH = 2_000_000;  // cap SVG width so browsers stay happy
 const ZOOM_STEP = 1.6;
 const LABEL_MIN_WIDTH_PX = 20;    // hide bar labels below this rendered width
 
+// Signal (histogram) lane sizing. Signals may hold millions of points, so we
+// bin them per-render into at most MAX_SIGNAL_BINS bars. Backed by a dense
+// Int32Array (indexed by position - dataMin) so binning is a cache-friendly
+// linear scan over the visible range.
+const MAX_SIGNAL_BINS = 500_000;
+const SIGNAL_LANE_HEIGHT = 100;
+const SIGNAL_LANE_GAP = 10;
+
 const state = {
   genes: [],
   peaks: [],
+  signals: [],   // [{ name, dataMin, dataMax, data: Int32Array, maxScore }]
   dataMin: 0,
   dataMax: 1,
   zoom: 1,
@@ -36,6 +45,9 @@ const state = {
 async function loadDataFromFiles() {
   const genesFile = document.getElementById('genes-file').files[0];
   const peaksFile = document.getElementById('peaks-file').files[0];
+  const signalFiles = Array.from(
+    document.getElementById('signals-file').files || [],
+  );
 
   if (!genesFile || !peaksFile) {
     status.textContent = 'Please select both files first.';
@@ -43,20 +55,28 @@ async function loadDataFromFiles() {
   }
 
   try {
-    const [genesText, peaksText] = await Promise.all([
+    const [genesText, peaksText, ...signalTexts] = await Promise.all([
       readFileSmart(genesFile),
       readFileSmart(peaksFile),
+      ...signalFiles.map(readFileSmart),
     ]);
 
     state.genes = parseGenes(genesText);
     state.peaks = parsePeaks(peaksText);
+    state.signals = signalTexts
+      .map((text, i) => parseSignal(text, signalFiles[i].name))
+      .filter(Boolean);
 
     if (state.genes.length === 0 && state.peaks.length === 0) {
       status.textContent = 'No features found in the provided files.';
       return;
     }
 
-    const { min, max } = computeDataExtent(state.genes, state.peaks);
+    const { min, max } = computeDataExtent(
+      state.genes,
+      state.peaks,
+      state.signals,
+    );
     // Pad by 1% each side so features never sit flush against the edges.
     const pad = Math.max(1, Math.round((max - min) * 0.01));
     state.dataMin = Math.max(0, min - pad);
@@ -65,7 +85,11 @@ async function loadDataFromFiles() {
 
     render();
     container.scrollLeft = 0;
-    status.textContent = `Loaded ${state.genes.length} genes and ${state.peaks.length} peaks.`;
+    const signalMsg = state.signals.length
+      ? `, ${state.signals.length} signal track${state.signals.length > 1 ? 's' : ''}`
+      : '';
+    status.textContent =
+      `Loaded ${state.genes.length} genes and ${state.peaks.length} peaks${signalMsg}.`;
   } catch (err) {
     console.error(err);
     status.textContent = `Failed to load files: ${err.message}`;
@@ -118,12 +142,55 @@ function parsePeaks(text) {
     .filter((row) => Number.isFinite(row.start) && Number.isFinite(row.end));
 }
 
+// Signal GFF: each row is a single position (start == end) with an integer
+// score. Stored as a dense Int32Array indexed by (pos - dataMin) so binning
+// during render is a tight, cache-friendly scan.
+function parseSignal(text, name) {
+  const lines = text.split(/\r?\n/);
+  const positions = [];
+  const scores = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+    const t = line.charCodeAt(0);
+    if (t === 35 /* # */) continue;
+    const cols = line.split('\t');
+    if (cols.length < 6) continue;
+    const p = +cols[3];
+    const s = +cols[5];
+    if (p === p && s === s) {   // NaN-safe: NaN !== NaN
+      positions.push(p);
+      scores.push(s);
+    }
+  }
+  if (positions.length === 0) return null;
+
+  let min = positions[0];
+  let max = positions[0];
+  for (let i = 1; i < positions.length; i++) {
+    const p = positions[i];
+    if (p < min) min = p;
+    else if (p > max) max = p;
+  }
+  const span = max - min + 1;
+  const data = new Int32Array(span);
+  let maxScore = 0;
+  for (let i = 0; i < positions.length; i++) {
+    const idx = positions[i] - min;
+    const s = scores[i] | 0;
+    // Duplicate positions collapse to their max, matching histogram semantics.
+    if (s > data[idx]) data[idx] = s;
+    if (s > maxScore) maxScore = s;
+  }
+  return { name, dataMin: min, dataMax: max, data, maxScore };
+}
+
 function extractName(attr) {
   const match = attr.match(/name=([^;"]+)/i);
   return match ? match[1].trim() : 'unknown';
 }
 
-function computeDataExtent(genes, peaks) {
+function computeDataExtent(genes, peaks, signals = []) {
   let min = Infinity;
   let max = -Infinity;
   for (const g of genes) {
@@ -133,6 +200,10 @@ function computeDataExtent(genes, peaks) {
   for (const p of peaks) {
     if (p.start < min) min = p.start;
     if (p.end > max) max = p.end;
+  }
+  for (const s of signals) {
+    if (s.dataMin < min) min = s.dataMin;
+    if (s.dataMax > max) max = s.dataMax;
   }
   if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
     return { min: 0, max: 1 };
@@ -185,10 +256,19 @@ function totalWidthPx() {
 function render() {
   const dataSpan = Math.max(1, state.dataMax - state.dataMin);
   const width = totalWidthPx();
-  const height = 340;
   const margin = { top: 24, right: 24, bottom: 46, left: 24 };
+
+  const laneHeight = 22;
+  const laneGap = 10;
+  const peakHeight = 18;
+  const basePlotHeight = 270; // preserves original no-signal layout exactly
+
+  // Extra vertical space needed to fit the histogram lanes.
+  const signalsBlock = state.signals.length
+    * (SIGNAL_LANE_HEIGHT + SIGNAL_LANE_GAP);
+  const plotHeight = basePlotHeight + signalsBlock;
+  const height = plotHeight + margin.top + margin.bottom;
   const plotWidth = width - margin.left - margin.right;
-  const plotHeight = height - margin.top - margin.bottom;
 
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svg.setAttribute('width', width);
@@ -200,14 +280,20 @@ function render() {
   const xOf = (coord) =>
     margin.left + ((coord - state.dataMin) / dataSpan) * plotWidth;
 
-  // Lane geometry: forward strand above axis, reverse strand below.
-  const axisY = margin.top + plotHeight / 2;
-  const laneHeight = 22;
-  const laneGap = 10;
+  // Gene lane geometry (unchanged from the original layout).
+  const axisY = margin.top + basePlotHeight / 2;
   const forwardY = axisY - laneGap - laneHeight;
   const reverseY = axisY + laneGap;
-  const peakY = axisY + laneGap + laneHeight + 14;
-  const peakHeight = 18;
+
+  // Signal lanes stack directly below the reverse-strand gene lane. When
+  // there are no signals, peakY falls back to its original position.
+  const firstSignalY = reverseY + laneHeight + SIGNAL_LANE_GAP;
+  const signalYs = state.signals.map(
+    (_, i) => firstSignalY + i * (SIGNAL_LANE_HEIGHT + SIGNAL_LANE_GAP),
+  );
+  const peakY = state.signals.length
+    ? signalYs[signalYs.length - 1] + SIGNAL_LANE_HEIGHT + SIGNAL_LANE_GAP
+    : axisY + laneGap + laneHeight + 14;
 
   // ---- Grid & ticks ----
   const targetTicks = Math.max(6, Math.round(plotWidth / 110));
@@ -270,6 +356,11 @@ function render() {
     svg.appendChild(group);
   }
 
+  // ---- Signal histograms ----
+  for (let i = 0; i < state.signals.length; i++) {
+    renderSignalLane(state.signals[i], signalYs[i], plotWidth, xOf);
+  }
+
   // ---- Peaks ----
   for (const peak of state.peaks) {
     const x1 = xOf(peak.start);
@@ -301,6 +392,98 @@ function render() {
 
     svg.appendChild(group);
   }
+}
+
+// Renders one signal track as a step-histogram <path>. Bin count is derived
+// from the SVG pixel width so detail scales naturally with zoom, capped at
+// MAX_SIGNAL_BINS to keep the DOM cheap. Aggregation uses max-per-bin.
+function renderSignalLane(signal, laneTop, plotWidth, xOf) {
+  const { name, dataMin: sMin, dataMax: sMax, data, maxScore } = signal;
+  const laneBottom = laneTop + SIGNAL_LANE_HEIGHT;
+
+  const group = svgEl('g', { class: 'signal-lane' });
+
+  // Lane background + border so empty regions are still visible.
+  group.appendChild(svgEl('rect', {
+    x: xOf(state.dataMin), y: laneTop,
+    width: Math.max(0, xOf(state.dataMax) - xOf(state.dataMin)),
+    height: SIGNAL_LANE_HEIGHT,
+    class: 'signal-lane-bg',
+  }));
+
+  if (maxScore <= 0) { svg.appendChild(group); return; }
+
+  const dataSpan = Math.max(1, state.dataMax - state.dataMin);
+  const targetBins = Math.min(
+    MAX_SIGNAL_BINS,
+    Math.max(200, Math.round(plotWidth * 2)),
+  );
+  const binBp = Math.max(1, Math.ceil(dataSpan / targetBins));
+
+  const startBin = Math.max(0, Math.floor((sMin - state.dataMin) / binBp));
+  const endBin = Math.floor((sMax - state.dataMin) / binBp);
+
+  // Build a stepped polygon: baseline → up/down through each bin → baseline.
+  // Using one <path> keeps the DOM tiny even for thousands of bins.
+  const parts = [];
+  let started = false;
+  let lastX2 = 0;
+  const scale = SIGNAL_LANE_HEIGHT / maxScore;
+
+  for (let bin = startBin; bin <= endBin; bin++) {
+    const binStartBp = state.dataMin + bin * binBp;
+    const binEndBp = binStartBp + binBp;
+
+    const lo = Math.max(binStartBp, sMin) - sMin;
+    const hi = Math.min(binEndBp - 1, sMax) - sMin;
+    if (lo > hi) continue;
+
+    let m = 0;
+    for (let i = lo; i <= hi; i++) {
+      const v = data[i];
+      if (v > m) m = v;
+    }
+
+    const x1 = xOf(binStartBp);
+    const x2 = xOf(binEndBp);
+    const y = laneBottom - m * scale;
+
+    if (!started) {
+      parts.push(`M${x1.toFixed(2)} ${laneBottom.toFixed(2)}`);
+      parts.push(`L${x1.toFixed(2)} ${y.toFixed(2)}`);
+      started = true;
+    } else {
+      parts.push(`L${x1.toFixed(2)} ${y.toFixed(2)}`);
+    }
+    parts.push(`L${x2.toFixed(2)} ${y.toFixed(2)}`);
+    lastX2 = x2;
+  }
+
+  if (started) {
+    parts.push(`L${lastX2.toFixed(2)} ${laneBottom.toFixed(2)}`);
+    parts.push('Z');
+    group.appendChild(svgEl('path', {
+      d: parts.join(' '),
+      class: 'signal-path',
+    }));
+  }
+
+  // Lane label (name + max score) pinned to the left edge of the viewport.
+  const label = svgEl('text', {
+    x: xOf(state.dataMin) + 6,
+    y: laneTop + 12,
+    class: 'signal-label',
+  });
+  label.textContent = `${name}  (max ${maxScore})`;
+  group.appendChild(label);
+
+  const title = svgEl('title');
+  title.textContent =
+    `${name}\n${sMin.toLocaleString()}\u2013${sMax.toLocaleString()} bp\n` +
+    `max score ${maxScore}`;
+  group.appendChild(title);
+
+  svg.appendChild(group);
 }
 
 // ---------------------------------------------------------------------------
