@@ -428,3 +428,96 @@ window.addEventListener('resize', () => {
     setZoom(state.zoom, anchor);
   }, 120);
 });
+
+// ---------------------------------------------------------------------------
+// Drag-to-zoom selection
+// ---------------------------------------------------------------------------
+
+const selectionOverlay = document.getElementById('selection-overlay');
+let dragState = null;
+
+container.addEventListener('mousedown', (event) => {
+  // Only respond to primary button, ignore if Ctrl is held (that's for wheel zoom)
+  if (event.button !== 0 || event.ctrlKey || event.metaKey) return;
+  // Don't start drag on scrollbar area
+  if (event.offsetY > container.clientHeight - 12) return;
+
+  dragState = {
+    startX: event.clientX,
+    scrollLeftAtStart: container.scrollLeft,
+  };
+
+  // Prevent text selection while dragging
+  event.preventDefault();
+});
+
+window.addEventListener('mousemove', (event) => {
+  if (!dragState) return;
+
+  const currentX = event.clientX;
+  const rect = container.getBoundingClientRect();
+
+  // Compute positions relative to the container's left edge
+  const startRel = dragState.startX - rect.left;
+  const currentRel = currentX - rect.left;
+
+  const left = Math.max(0, Math.min(startRel, currentRel));
+  const right = Math.min(container.clientWidth, Math.max(startRel, currentRel));
+  const width = right - left;
+
+  if (width > 4) {
+    // Position overlay accounting for scroll — it's inside the scrollable container
+    selectionOverlay.style.left = `${left + container.scrollLeft}px`;
+    selectionOverlay.style.width = `${width}px`;
+    selectionOverlay.hidden = false;
+  } else {
+    selectionOverlay.hidden = true;
+  }
+});
+
+window.addEventListener('mouseup', (event) => {
+  if (!dragState) return;
+
+  selectionOverlay.hidden = true;
+
+  const rect = container.getBoundingClientRect();
+  const startRel = dragState.startX - rect.left;
+  const endRel = event.clientX - rect.left;
+
+  const leftPx = Math.max(0, Math.min(startRel, endRel));
+  const rightPx = Math.min(container.clientWidth, Math.max(startRel, endRel));
+  const widthPx = rightPx - leftPx;
+
+  dragState = null;
+
+  // Only zoom if the user dragged a meaningful distance (> 8px)
+  if (widthPx < 8 || state.dataMax <= state.dataMin) return;
+
+  // Convert pixel positions to data coordinates
+  const svgWidth = totalWidthPx();
+  const dataSpan = state.dataMax - state.dataMin;
+
+  const coordLeft =
+    state.dataMin +
+    ((container.scrollLeft + leftPx) / svgWidth) * dataSpan;
+  const coordRight =
+    state.dataMin +
+    ((container.scrollLeft + rightPx) / svgWidth) * dataSpan;
+
+  // Compute new zoom so that [coordLeft, coordRight] fills the viewport
+  const selectedFraction = (coordRight - coordLeft) / dataSpan;
+  const newZoom = clampZoom(1 / selectedFraction);
+
+  state.zoom = newZoom;
+  render();
+
+  // Scroll so coordLeft aligns with the left edge of the viewport
+  const newSvgWidth = totalWidthPx();
+  const newScrollLeft =
+    ((coordLeft - state.dataMin) / dataSpan) * newSvgWidth;
+
+  container.scrollLeft = Math.max(
+    0,
+    Math.min(newSvgWidth - container.clientWidth, newScrollLeft),
+  );
+});
