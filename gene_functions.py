@@ -246,6 +246,7 @@ def find_operon(peak_start, peak_end, genes, operon_gap=100, proximity=600):
 
     return f"{first_gene} - {last_gene}"
 
+
 def annotate_peaks(peaks_df, mab_df, proximity=600, operon_gap=30):
     gene_table = build_gene_table(mab_df)
     genes = gene_table["genes"]
