@@ -45,6 +45,6 @@ if __name__ == '__main__':
     print("Output preview:")
     print(regulated_peaks.head())
     
-    out_path = args.output or config.get('paths', {}).get('output', 'regulated_peaks_out.csv')
+    out_path = args.output or config.get('paths', {}).get('output_path', 'regulated_peaks_out.csv')
     regulated_peaks.to_csv(out_path, index=False)
     print("Saved analysis to", out_path)
