@@ -896,28 +896,38 @@ window.addEventListener('mouseup', (event) => {
   // Only zoom if the user dragged a meaningful distance (> 8px)
   if (widthPx < 8 || state.dataMax <= state.dataMin) return;
 
-  // Convert pixel positions to data coordinates
+  // Convert pixel positions to data coordinates, accounting for plot margins
   const svgWidth = totalWidthPx();
+  const margin = layoutState.margin || {left: 24, right: 24};
+  const plotWidth = svgWidth - margin.left - margin.right;
   const dataSpan = state.dataMax - state.dataMin;
 
   const coordLeft =
     state.dataMin +
-    ((container.scrollLeft + leftPx) / svgWidth) * dataSpan;
+    ((container.scrollLeft + leftPx - margin.left) / plotWidth) * dataSpan;
   const coordRight =
     state.dataMin +
-    ((container.scrollLeft + rightPx) / svgWidth) * dataSpan;
+    ((container.scrollLeft + rightPx - margin.left) / plotWidth) * dataSpan;
+
+  // Clamp to data range
+  const clampedLeft = Math.max(state.dataMin, Math.min(coordLeft, coordLeft));
+  const clampedRight = Math.max(state.dataMin, Math.max(coordLeft, coordRight));
+
+  if (clampedRight <= clampedLeft) return;
 
   // Compute new zoom so that [coordLeft, coordRight] fills the viewport
-  const selectedFraction = (coordRight - coordLeft) / dataSpan;
+  const selectedFraction = (clampedRight - clampedLeft) / dataSpan;
   const newZoom = clampZoom(1 / selectedFraction);
 
   state.zoom = newZoom;
   render();
 
-  // Scroll so coordLeft aligns with the left edge of the viewport
+  // Scroll so clampedLeft aligns with the left edge of the viewport
   const newSvgWidth = totalWidthPx();
+  const newMargin = layoutState.margin || {left: 24, right: 24};
+  const newPlotWidth = newSvgWidth - newMargin.left - newMargin.right;
   const newScrollLeft =
-    ((coordLeft - state.dataMin) / dataSpan) * newSvgWidth;
+    newMargin.left + ((clampedLeft - state.dataMin) / dataSpan) * newPlotWidth;
 
   container.scrollLeft = Math.max(
     0,
