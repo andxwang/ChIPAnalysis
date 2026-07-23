@@ -281,12 +281,27 @@ svg#chart {
   stroke-width: 1;
 }
 
+.signal-axis {
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+  pointer-events: none;
+}
+
 .signal-path {
-  fill: rgba(244, 158, 76, 0.55);
-  stroke: #f49e4c;
   stroke-width: 0.8;
   shape-rendering: crispEdges;
   pointer-events: none;
+}
+
+.signal-path-pos {
+  fill: rgba(244, 158, 76, 0.55);
+  stroke: #f49e4c;
+}
+
+.signal-path-neg {
+  fill: rgba(120, 180, 255, 0.55);
+  stroke: #78b4ff;
 }
 
 .signal-label {
@@ -294,6 +309,9 @@ svg#chart {
   font-size: 11px;
   font-weight: 700;
   pointer-events: none;
+  paint-order: stroke;
+  stroke: rgba(9, 12, 32, 0.75);
+  stroke-width: 3;
 }
 
 .axis-line {
@@ -327,4 +345,62 @@ svg#chart {
 
 .chart-scroll {
   position: relative;
+}
+
+/* ---------------------------------------------------- Signal controls panel */
+
+.signal-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-top: 4px;
+}
+
+.signal-controls-heading {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+
+.signal-control-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.signal-control-name {
+  min-width: 140px;
+  font-weight: 700;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.signal-cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.signal-cap input {
+  width: 90px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.signal-cap input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }

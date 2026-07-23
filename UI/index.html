@@ -46,7 +46,7 @@
 
           <div class="upload-group">
             <label class="file-label">
-              <span>Reference genome GFF</span>
+              <span>Gene GFF</span>
               <input id="genes-file" type="file" accept=".gff,.txt" />
             </label>
             <label class="file-label">
@@ -64,6 +64,8 @@
         <div class="toolbar-row toolbar-readouts">
           <div id="status" class="status">Please upload gene and peak files.</div>
         </div>
+
+        <div id="signal-controls" class="signal-controls" hidden></div>
       </section>
 
       <section class="chart-card">
@@ -79,7 +81,7 @@
           </div>
         </div>
         <p class="hint">
-          <kbd>←</kbd> <kbd>→</kbd> or scroll to pan · <kbd>+</kbd> <kbd>-</kbd> zoom ·
+          <kbd>←</kbd> <kbd>→</kbd> or scroll to pan · <kbd>+</kbd> <kbd>−</kbd> zoom ·
           <kbd>0</kbd> reset · <kbd>Ctrl</kbd> + scroll zooms toward the cursor ·
           click &amp; drag to zoom to selection.
         </p>

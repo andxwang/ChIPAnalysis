@@ -21,21 +21,31 @@ const MAX_TOTAL_WIDTH = 2_000_000;  // cap SVG width so browsers stay happy
 const ZOOM_STEP = 1.6;
 const LABEL_MIN_WIDTH_PX = 20;    // hide bar labels below this rendered width
 
-// Signal (histogram) lane sizing. Signals may hold millions of points, so we
-// bin them per-render into at most MAX_SIGNAL_BINS bars. Backed by a dense
-// Int32Array (indexed by position - dataMin) so binning is a cache-friendly
-// linear scan over the visible range.
-const MAX_SIGNAL_BINS = 500_000;
+// Signal (histogram) lane sizing. Signals may hold millions of points, so
+// each render is viewport-scoped: we only build path vertices for the bins
+// that fall within (visible x range + padding), at roughly one bin per pixel.
+// This keeps the DOM small regardless of zoom or track size.
 const SIGNAL_LANE_HEIGHT = 100;
 const SIGNAL_LANE_GAP = 10;
+const SIGNAL_BINS_PER_PX = 1;      // aggregation density inside the viewport
+const SIGNAL_MAX_BINS_PER_LANE = 4000; // safety cap per lane per render
+const SIGNAL_VIEWPORT_PAD_FRAC = 0.75; // extra viewport-widths rendered off-screen
 
 const state = {
   genes: [],
   peaks: [],
-  signals: [],   // [{ name, dataMin, dataMax, data: Int32Array, maxScore }]
+  signals: [],
   dataMin: 0,
   dataMax: 1,
   zoom: 1,
+};
+
+// Saved geometry from the last render() so we can re-render only the signal
+// lanes on scroll without recomputing the full layout.
+const layoutState = {
+  margin: null,
+  plotWidth: 0,
+  signalYs: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -85,6 +95,7 @@ async function loadDataFromFiles() {
 
     render();
     container.scrollLeft = 0;
+    buildSignalControls();
     const signalMsg = state.signals.length
       ? `, ${state.signals.length} signal track${state.signals.length > 1 ? 's' : ''}`
       : '';
@@ -143,8 +154,10 @@ function parsePeaks(text) {
 }
 
 // Signal GFF: each row is a single position (start == end) with an integer
-// score. Stored as a dense Int32Array indexed by (pos - dataMin) so binning
-// during render is a tight, cache-friendly scan.
+// score. Files often list all positive scores first and then repeat the same
+// coordinate range with negative scores, so we split them into two dense
+// Int32Arrays indexed by (pos - dataMin). Both are rendered as mirrored
+// halves of a single centered histogram lane.
 function parseSignal(text, name) {
   const lines = text.split(/\r?\n/);
   const positions = [];
@@ -152,8 +165,7 @@ function parseSignal(text, name) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
-    const t = line.charCodeAt(0);
-    if (t === 35 /* # */) continue;
+    if (line.charCodeAt(0) === 35 /* # */) continue;
     const cols = line.split('\t');
     if (cols.length < 6) continue;
     const p = +cols[3];
@@ -173,16 +185,36 @@ function parseSignal(text, name) {
     else if (p > max) max = p;
   }
   const span = max - min + 1;
-  const data = new Int32Array(span);
-  let maxScore = 0;
+  const posData = new Int32Array(span);
+  let negData = null;   // allocated lazily — most tracks have no negatives
+  let posMax = 0;
+  let negMax = 0;       // magnitude of the most-negative score
+
   for (let i = 0; i < positions.length; i++) {
     const idx = positions[i] - min;
     const s = scores[i] | 0;
-    // Duplicate positions collapse to their max, matching histogram semantics.
-    if (s > data[idx]) data[idx] = s;
-    if (s > maxScore) maxScore = s;
+    if (s >= 0) {
+      if (s > posData[idx]) posData[idx] = s;
+      if (s > posMax) posMax = s;
+    } else {
+      if (negData === null) negData = new Int32Array(span);
+      const a = -s;
+      if (a > negData[idx]) negData[idx] = a;
+      if (a > negMax) negMax = a;
+    }
   }
-  return { name, dataMin: min, dataMax: max, data, maxScore };
+  return {
+    name,
+    dataMin: min,
+    dataMax: max,
+    posData,
+    negData,
+    posMax,
+    negMax,
+    // User-tunable display caps (null → auto). Set via the controls panel.
+    viewPosMax: null,
+    viewNegMax: null,
+  };
 }
 
 function extractName(attr) {
@@ -357,8 +389,11 @@ function render() {
   }
 
   // ---- Signal histograms ----
+  layoutState.margin = margin;
+  layoutState.plotWidth = plotWidth;
+  layoutState.signalYs = signalYs;
   for (let i = 0; i < state.signals.length; i++) {
-    renderSignalLane(state.signals[i], signalYs[i], plotWidth, xOf);
+    renderSignalLane(state.signals[i], signalYs[i], plotWidth, xOf, margin);
   }
 
   // ---- Peaks ----
@@ -394,62 +429,148 @@ function render() {
   }
 }
 
-// Renders one signal track as a step-histogram <path>. Bin count is derived
-// from the SVG pixel width so detail scales naturally with zoom, capped at
-// MAX_SIGNAL_BINS to keep the DOM cheap. Aggregation uses max-per-bin.
-function renderSignalLane(signal, laneTop, plotWidth, xOf) {
-  const { name, dataMin: sMin, dataMax: sMax, data, maxScore } = signal;
-  const laneBottom = laneTop + SIGNAL_LANE_HEIGHT;
+// Signal lane: centered horizontal axis, positive scores mirrored above,
+// negative-score magnitudes mirrored below. Rendering is viewport-scoped —
+// we only walk bins that overlap the visible region (plus some padding), at
+// ~1 bin per CSS pixel. This makes both very fine detail at high zoom AND
+// panning cheap. Custom viewPosMax/viewNegMax clamp the display range so
+// tall outliers don't flatten the smaller peaks.
+function renderSignalLane(signal, laneTop, plotWidth, xOf, margin) {
+  const {
+    name, dataMin: sMin, dataMax: sMax,
+    posData, negData, posMax, negMax,
+    viewPosMax, viewNegMax,
+  } = signal;
+
+  const centerY = laneTop + SIGNAL_LANE_HEIGHT / 2;
+  const halfH = SIGNAL_LANE_HEIGHT / 2;
 
   const group = svgEl('g', { class: 'signal-lane' });
 
-  // Lane background + border so empty regions are still visible.
+  // Full-range background so empty stretches read as "no data" rather than
+  // as the parent chart backdrop.
   group.appendChild(svgEl('rect', {
     x: xOf(state.dataMin), y: laneTop,
     width: Math.max(0, xOf(state.dataMax) - xOf(state.dataMin)),
     height: SIGNAL_LANE_HEIGHT,
     class: 'signal-lane-bg',
   }));
+  group.appendChild(svgEl('line', {
+    x1: xOf(state.dataMin), x2: xOf(state.dataMax),
+    y1: centerY, y2: centerY,
+    class: 'signal-axis',
+  }));
 
-  if (maxScore <= 0) { svg.appendChild(group); return; }
+  const effPosMax = viewPosMax != null ? viewPosMax : posMax;
+  const effNegMax = viewNegMax != null ? viewNegMax : negMax;
 
+  // Clip work to the visible x range in data coordinates.
   const dataSpan = Math.max(1, state.dataMax - state.dataMin);
-  const targetBins = Math.min(
-    MAX_SIGNAL_BINS,
-    Math.max(200, Math.round(plotWidth * 2)),
+  const viewWidth = Math.max(1, container.clientWidth);
+  const padPx = viewWidth * SIGNAL_VIEWPORT_PAD_FRAC;
+  const visStartPx = Math.max(margin.left, container.scrollLeft - padPx);
+  const visEndPx = Math.min(
+    margin.left + plotWidth,
+    container.scrollLeft + viewWidth + padPx,
   );
-  const binBp = Math.max(1, Math.ceil(dataSpan / targetBins));
+  const visDataMin =
+    state.dataMin + ((visStartPx - margin.left) / plotWidth) * dataSpan;
+  const visDataMax =
+    state.dataMin + ((visEndPx - margin.left) / plotWidth) * dataSpan;
 
-  const startBin = Math.max(0, Math.floor((sMin - state.dataMin) / binBp));
-  const endBin = Math.floor((sMax - state.dataMin) / binBp);
+  const rangeMin = Math.max(sMin, Math.floor(visDataMin));
+  const rangeMax = Math.min(sMax, Math.ceil(visDataMax));
 
-  // Build a stepped polygon: baseline → up/down through each bin → baseline.
-  // Using one <path> keeps the DOM tiny even for thousands of bins.
+  if (rangeMin <= rangeMax) {
+    const visSpanBp = rangeMax - rangeMin + 1;
+    const visSpanPx = Math.max(1, xOf(rangeMax) - xOf(rangeMin));
+    const targetBins = Math.min(
+      SIGNAL_MAX_BINS_PER_LANE,
+      Math.max(50, Math.round(visSpanPx * SIGNAL_BINS_PER_PX)),
+    );
+    const binBp = Math.max(1, Math.ceil(visSpanBp / targetBins));
+
+    if (effPosMax > 0) {
+      appendStepPath(
+        group, posData, sMin, rangeMin, rangeMax, binBp,
+        xOf, centerY, -halfH / effPosMax, effPosMax,
+        'signal-path signal-path-pos',
+      );
+    }
+    if (negData && effNegMax > 0) {
+      appendStepPath(
+        group, negData, sMin, rangeMin, rangeMax, binBp,
+        xOf, centerY, halfH / effNegMax, effNegMax,
+        'signal-path signal-path-neg',
+      );
+    }
+  }
+
+  // Label follows the viewport left edge so the track name stays visible
+  // while panning.
+  const labelX = Math.min(
+    xOf(state.dataMax) - 4,
+    Math.max(xOf(state.dataMin) + 6, container.scrollLeft + margin.left + 6),
+  );
+  const label = svgEl('text', {
+    x: labelX,
+    y: laneTop + 12,
+    class: 'signal-label',
+  });
+  const rangeText = negData
+    ? `+${posMax} / -${negMax}`
+    : `max ${posMax}`;
+  label.textContent = `${name}  (${rangeText})`;
+  group.appendChild(label);
+
+  const title = svgEl('title');
+  title.textContent =
+    `${name}\n${sMin.toLocaleString()}\u2013${sMax.toLocaleString()} bp\n` +
+    `positive max ${posMax}` +
+    (negData ? `\nnegative max ${negMax}` : '');
+  group.appendChild(title);
+
+  svg.appendChild(group);
+}
+
+// Draws a step-histogram path for one half of a signal lane.
+// `yPerUnit` maps a data value → pixel offset from `baselineY`. Use a
+// negative value to draw upward from the baseline, positive to draw down.
+// Values above `cap` are clipped so the caller controls the visual ceiling.
+function appendStepPath(
+  group, data, sMin, rangeMin, rangeMax, binBp,
+  xOf, baselineY, yPerUnit, cap, className,
+) {
+  const startIdx = Math.max(0, rangeMin - sMin);
+  const endIdx = Math.min(data.length - 1, rangeMax - sMin);
+  if (startIdx > endIdx) return;
+
+  // Snap bin boundaries to multiples of binBp so pos/neg halves align.
+  const startBin = Math.floor(startIdx / binBp);
+  const endBin = Math.floor(endIdx / binBp);
+
   const parts = [];
   let started = false;
   let lastX2 = 0;
-  const scale = SIGNAL_LANE_HEIGHT / maxScore;
 
   for (let bin = startBin; bin <= endBin; bin++) {
-    const binStartBp = state.dataMin + bin * binBp;
-    const binEndBp = binStartBp + binBp;
-
-    const lo = Math.max(binStartBp, sMin) - sMin;
-    const hi = Math.min(binEndBp - 1, sMax) - sMin;
-    if (lo > hi) continue;
+    const lo = bin * binBp;
+    const hi = Math.min(lo + binBp - 1, data.length - 1);
+    if (lo >= data.length) break;
 
     let m = 0;
     for (let i = lo; i <= hi; i++) {
       const v = data[i];
       if (v > m) m = v;
     }
+    const clipped = m > cap ? cap : m;
 
-    const x1 = xOf(binStartBp);
-    const x2 = xOf(binEndBp);
-    const y = laneBottom - m * scale;
+    const x1 = xOf(sMin + lo);
+    const x2 = xOf(sMin + hi + 1);
+    const y = baselineY + clipped * yPerUnit;
 
     if (!started) {
-      parts.push(`M${x1.toFixed(2)} ${laneBottom.toFixed(2)}`);
+      parts.push(`M${x1.toFixed(2)} ${baselineY.toFixed(2)}`);
       parts.push(`L${x1.toFixed(2)} ${y.toFixed(2)}`);
       started = true;
     } else {
@@ -460,30 +581,81 @@ function renderSignalLane(signal, laneTop, plotWidth, xOf) {
   }
 
   if (started) {
-    parts.push(`L${lastX2.toFixed(2)} ${laneBottom.toFixed(2)}`);
-    parts.push('Z');
-    group.appendChild(svgEl('path', {
-      d: parts.join(' '),
-      class: 'signal-path',
-    }));
+    parts.push(`L${lastX2.toFixed(2)} ${baselineY.toFixed(2)} Z`);
+    group.appendChild(svgEl('path', { d: parts.join(' '), class: className }));
   }
+}
 
-  // Lane label (name + max score) pinned to the left edge of the viewport.
-  const label = svgEl('text', {
-    x: xOf(state.dataMin) + 6,
-    y: laneTop + 12,
-    class: 'signal-label',
+// Re-renders just the signal lanes using cached layout. Called from the
+// scroll handler (rAF-throttled) and after the user tweaks Y-axis caps.
+function renderSignalsOnly() {
+  if (!layoutState.margin || state.signals.length === 0) return;
+  svg.querySelectorAll('g.signal-lane').forEach((n) => n.remove());
+  const { margin, plotWidth, signalYs } = layoutState;
+  const dataSpan = Math.max(1, state.dataMax - state.dataMin);
+  const xOf = (coord) =>
+    margin.left + ((coord - state.dataMin) / dataSpan) * plotWidth;
+  for (let i = 0; i < state.signals.length; i++) {
+    renderSignalLane(state.signals[i], signalYs[i], plotWidth, xOf, margin);
+  }
+}
+
+// Builds one row of Y-axis cap inputs per signal underneath the toolbar.
+function buildSignalControls() {
+  const host = document.getElementById('signal-controls');
+  host.replaceChildren();
+  if (state.signals.length === 0) {
+    host.hidden = true;
+    return;
+  }
+  host.hidden = false;
+
+  const heading = document.createElement('div');
+  heading.className = 'signal-controls-heading';
+  heading.textContent = 'Signal Y-axis caps (blank = auto)';
+  host.appendChild(heading);
+
+  for (const signal of state.signals) {
+    const row = document.createElement('div');
+    row.className = 'signal-control-row';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'signal-control-name';
+    nameEl.textContent = signal.name;
+    row.appendChild(nameEl);
+
+    row.appendChild(makeCapInput(
+      signal, 'viewPosMax', '+max', `auto ${signal.posMax}`,
+    ));
+    if (signal.negData) {
+      row.appendChild(makeCapInput(
+        signal, 'viewNegMax', '−max', `auto ${signal.negMax}`,
+      ));
+    }
+
+    host.appendChild(row);
+  }
+}
+
+function makeCapInput(signal, field, labelText, placeholder) {
+  const wrap = document.createElement('label');
+  wrap.className = 'signal-cap';
+  const lbl = document.createElement('span');
+  lbl.textContent = labelText;
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '1';
+  input.step = '1';
+  input.placeholder = placeholder;
+  input.addEventListener('input', () => {
+    const raw = input.value.trim();
+    const v = raw === '' ? null : Math.max(1, Number(raw));
+    signal[field] = Number.isFinite(v) ? v : null;
+    renderSignalsOnly();
   });
-  label.textContent = `${name}  (max ${maxScore})`;
-  group.appendChild(label);
-
-  const title = svgEl('title');
-  title.textContent =
-    `${name}\n${sMin.toLocaleString()}\u2013${sMax.toLocaleString()} bp\n` +
-    `max score ${maxScore}`;
-  group.appendChild(title);
-
-  svg.appendChild(group);
+  wrap.appendChild(lbl);
+  wrap.appendChild(input);
+  return wrap;
 }
 
 // ---------------------------------------------------------------------------
@@ -572,6 +744,18 @@ container.addEventListener(
   { passive: false },
 );
 
+// Signal lanes render only the visible slice, so we redraw them on pan.
+// rAF-throttled so a burst of scroll events collapses to at most one repaint.
+let signalScrollRafId = 0;
+container.addEventListener('scroll', () => {
+  if (state.signals.length === 0) return;
+  if (signalScrollRafId) return;
+  signalScrollRafId = requestAnimationFrame(() => {
+    signalScrollRafId = 0;
+    renderSignalsOnly();
+  });
+});
+
 // Keyboard: ←/→ pan, +/- zoom, 0 reset. Only fires when the chart is focused.
 container.addEventListener('keydown', (event) => {
   switch (event.key) {
@@ -603,7 +787,11 @@ container.addEventListener('keydown', (event) => {
 // Debounced re-render on resize so the SVG keeps filling the viewport.
 let resizeTimer = null;
 window.addEventListener('resize', () => {
-  if (state.genes.length === 0 && state.peaks.length === 0) return;
+  if (
+    state.genes.length === 0 &&
+    state.peaks.length === 0 &&
+    state.signals.length === 0
+  ) return;
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     const anchor =
