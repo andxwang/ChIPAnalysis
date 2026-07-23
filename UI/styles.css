@@ -368,6 +368,17 @@ svg#chart {
   font-weight: 700;
 }
 
+.signal-controls-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.signal-cap-master input {
+  width: 80px;
+}
+
 .signal-control-row {
   display: flex;
   align-items: center;

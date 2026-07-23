@@ -610,10 +610,42 @@ function buildSignalControls() {
   }
   host.hidden = false;
 
+  const headingRow = document.createElement('div');
+  headingRow.className = 'signal-controls-heading-row';
+
   const heading = document.createElement('div');
   heading.className = 'signal-controls-heading';
   heading.textContent = 'Signal Y-axis caps (blank = auto)';
-  host.appendChild(heading);
+  headingRow.appendChild(heading);
+
+  const masterWrap = document.createElement('label');
+  masterWrap.className = 'signal-cap signal-cap-master';
+  const masterLbl = document.createElement('span');
+  masterLbl.textContent = 'Change all max';
+  const masterInput = document.createElement('input');
+  masterInput.type = 'number';
+  masterInput.min = '1';
+  masterInput.step = '1';
+  masterInput.placeholder = 'all lanes';
+  masterInput.addEventListener('input', () => {
+    const raw = masterInput.value.trim();
+    const v = raw === '' ? null : Math.max(1, Number(raw));
+    const cap = Number.isFinite(v) ? v : null;
+    for (const signal of state.signals) {
+      signal.viewPosMax = cap;
+      if (signal.negData) signal.viewNegMax = cap;
+    }
+    // Update individual inputs to reflect master value
+    host.querySelectorAll('.signal-control-row input[type="number"]').forEach(inp => {
+      inp.value = cap != null ? cap : '';
+    });
+    renderSignalsOnly();
+  });
+  masterWrap.appendChild(masterLbl);
+  masterWrap.appendChild(masterInput);
+  headingRow.appendChild(masterWrap);
+
+  host.appendChild(headingRow);
 
   for (const signal of state.signals) {
     const row = document.createElement('div');
