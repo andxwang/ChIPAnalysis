@@ -293,7 +293,7 @@ function render() {
   const laneHeight = 22;
   const laneGap = 10;
   const peakHeight = 18;
-  const basePlotHeight = 270; // preserves original no-signal layout exactly
+  const basePlotHeight = 120; // preserves original no-signal layout exactly
 
   // Extra vertical space needed to fit the histogram lanes.
   const signalsBlock = state.signals.length
