@@ -15,6 +15,8 @@
 const svg = document.getElementById('chart');
 const status = document.getElementById('status');
 const container = document.getElementById('chart-container');
+const rulerOverlay = document.getElementById('ruler-overlay');
+const rulerLabel = document.getElementById('ruler-label');
 
 const MIN_ZOOM = 1;               // 1 = fit entire data range in viewport
 const MAX_TOTAL_WIDTH = 2_000_000;  // cap SVG width so browsers stay happy
@@ -285,7 +287,20 @@ function totalWidthPx() {
   return Math.min(MAX_TOTAL_WIDTH, Math.round(viewport * state.zoom));
 }
 
+function formatBp(bp) {
+  if (bp >= 1_000_000) return `${(bp / 1_000_000).toFixed(2)} Mbp`;
+  if (bp >= 1_000) return `${(bp / 1_000).toFixed(2)} kbp`;
+  return `${Math.round(bp)} bp`;
+}
+
+function clearRuler() {
+  rulerOverlay.hidden = true;
+  rulerLabel.hidden = true;
+  rulerState.active = false;
+}
+
 function render() {
+  clearRuler();
   const dataSpan = Math.max(1, state.dataMax - state.dataMin);
   const width = totalWidthPx();
   const margin = { top: 24, right: 24, bottom: 46, left: 24 };
@@ -838,8 +853,28 @@ window.addEventListener('resize', () => {
 
 const selectionOverlay = document.getElementById('selection-overlay');
 let dragState = null;
+let rulerState = { active: false };
+let rulerDragState = null;
+
+// Suppress browser context menu on the chart so right-click drag works.
+container.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+});
 
 container.addEventListener('mousedown', (event) => {
+  // Right-click: start a ruler drag, clearing any existing ruler first.
+  if (event.button === 2) {
+    clearRuler();
+    if (event.offsetY <= container.clientHeight - 12) {
+      rulerDragState = {
+        startX: event.clientX,
+        scrollLeftAtStart: container.scrollLeft,
+      };
+    }
+    event.preventDefault();
+    return;
+  }
+
   // Only respond to primary button, ignore if Ctrl is held (that's for wheel zoom)
   if (event.button !== 0 || event.ctrlKey || event.metaKey) return;
   // Don't start drag on scrollbar area
@@ -855,30 +890,96 @@ container.addEventListener('mousedown', (event) => {
 });
 
 window.addEventListener('mousemove', (event) => {
-  if (!dragState) return;
+  if (!dragState && !rulerDragState) return;
 
   const currentX = event.clientX;
   const rect = container.getBoundingClientRect();
 
-  // Compute positions relative to the container's left edge
-  const startRel = dragState.startX - rect.left;
-  const currentRel = currentX - rect.left;
+  if (dragState) {
+    // Compute positions relative to the container's left edge
+    const startRel = dragState.startX - rect.left;
+    const currentRel = currentX - rect.left;
 
-  const left = Math.max(0, Math.min(startRel, currentRel));
-  const right = Math.min(container.clientWidth, Math.max(startRel, currentRel));
-  const width = right - left;
+    const left = Math.max(0, Math.min(startRel, currentRel));
+    const right = Math.min(container.clientWidth, Math.max(startRel, currentRel));
+    const width = right - left;
 
-  if (width > 4) {
-    // Position overlay accounting for scroll — it's inside the scrollable container
-    selectionOverlay.style.left = `${left + container.scrollLeft}px`;
-    selectionOverlay.style.width = `${width}px`;
-    selectionOverlay.hidden = false;
-  } else {
-    selectionOverlay.hidden = true;
+    if (width > 4) {
+      // Position overlay accounting for scroll — it's inside the scrollable container
+      selectionOverlay.style.left = `${left + container.scrollLeft}px`;
+      selectionOverlay.style.width = `${width}px`;
+      selectionOverlay.hidden = false;
+    } else {
+      selectionOverlay.hidden = true;
+    }
+  }
+
+  if (rulerDragState) {
+    const startRel = rulerDragState.startX - rect.left;
+    const currentRel = currentX - rect.left;
+
+    const left = Math.max(0, Math.min(startRel, currentRel));
+    const right = Math.min(container.clientWidth, Math.max(startRel, currentRel));
+    const width = right - left;
+
+    if (width > 4) {
+      rulerOverlay.style.left = `${left + container.scrollLeft}px`;
+      rulerOverlay.style.width = `${width}px`;
+      rulerOverlay.hidden = false;
+
+      // Live bp distance label, centered above the ruler box
+      const svgWidth = totalWidthPx();
+      const margin = layoutState.margin || { left: 24, right: 24 };
+      const plotWidth = svgWidth - margin.left - margin.right;
+      const dataSpan = state.dataMax - state.dataMin;
+      const coordLeft = state.dataMin + ((container.scrollLeft + left - margin.left) / plotWidth) * dataSpan;
+      const coordRight = state.dataMin + ((container.scrollLeft + right - margin.left) / plotWidth) * dataSpan;
+      rulerLabel.textContent = formatBp(Math.abs(coordRight - coordLeft));
+      rulerLabel.style.left = `${left + width / 2 + container.scrollLeft}px`;
+      rulerLabel.hidden = false;
+    } else {
+      rulerOverlay.hidden = true;
+      rulerLabel.hidden = true;
+    }
   }
 });
 
 window.addEventListener('mouseup', (event) => {
+  // Right-click release: finalize ruler if a meaningful drag occurred.
+  if (event.button === 2) {
+    if (!rulerDragState) return;
+
+    const rect = container.getBoundingClientRect();
+    const startRel = rulerDragState.startX - rect.left;
+    const endRel = event.clientX - rect.left;
+
+    const leftPx = Math.max(0, Math.min(startRel, endRel));
+    const rightPx = Math.min(container.clientWidth, Math.max(startRel, endRel));
+    const widthPx = rightPx - leftPx;
+
+    rulerDragState = null;
+
+    if (widthPx < 4) {
+      // Too small to be intentional — ruler already cleared in mousedown.
+      return;
+    }
+
+    // Convert pixel extents to bp coordinates.
+    const svgWidth = totalWidthPx();
+    const margin = layoutState.margin || { left: 24, right: 24 };
+    const plotWidth = svgWidth - margin.left - margin.right;
+    const dataSpan = state.dataMax - state.dataMin;
+    const coordLeft = state.dataMin + ((container.scrollLeft + leftPx - margin.left) / plotWidth) * dataSpan;
+    const coordRight = state.dataMin + ((container.scrollLeft + rightPx - margin.left) / plotWidth) * dataSpan;
+
+    rulerLabel.textContent = formatBp(Math.abs(coordRight - coordLeft));
+    rulerLabel.style.left = `${leftPx + widthPx / 2 + container.scrollLeft}px`;
+    rulerLabel.hidden = false;
+    rulerOverlay.hidden = false;
+    rulerState.active = true;
+    return;
+  }
+
   if (!dragState) return;
 
   selectionOverlay.hidden = true;

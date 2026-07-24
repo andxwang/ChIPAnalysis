@@ -343,6 +343,33 @@ svg#chart {
   z-index: 10;
 }
 
+.ruler-overlay {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(23, 175, 180, 0.25);
+  border-left: 2px solid rgba(23, 175, 180, 0.75);
+  border-right: 2px solid rgba(23, 175, 180, 0.75);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.ruler-label {
+  position: absolute;
+  top: 4px;
+  background: rgba(23, 175, 180, 0.9);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 11;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  user-select: none;
+}
+
 .chart-scroll {
   position: relative;
 }

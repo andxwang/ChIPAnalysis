@@ -16,6 +16,8 @@
             Green bars are genes (+ strand above the axis, &minus; strand below);
             blue bars are peaks. Scroll horizontally to pan, or hold
             <kbd>Ctrl</kbd> and scroll to zoom toward the cursor.
+            Left click and drag to select a region to zoom in on.
+            Right click and drag to measure distance.
           </p>
         </div>
         <div class="legend">
@@ -81,6 +83,8 @@
           >
             <svg id="chart" role="img" aria-label="Genome coordinate chart"></svg>
             <div id="selection-overlay" class="selection-overlay" hidden></div>
+            <div id="ruler-overlay" class="ruler-overlay" hidden></div>
+            <div id="ruler-label" class="ruler-label" hidden></div>
           </div>
         </div>
         <p class="hint">
