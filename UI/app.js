@@ -15,6 +15,8 @@
 const svg = document.getElementById('chart');
 const status = document.getElementById('status');
 const container = document.getElementById('chart-container');
+const signalCanvas = document.getElementById('signal-canvas');
+const signalCtx = signalCanvas.getContext('2d');
 const rulerOverlay = document.getElementById('ruler-overlay');
 const rulerLabel = document.getElementById('ruler-label');
 
@@ -403,13 +405,14 @@ function render() {
     svg.appendChild(group);
   }
 
-  // ---- Signal histograms ----
+  // ---- Signal histograms (canvas-based) ----
   layoutState.margin = margin;
   layoutState.plotWidth = plotWidth;
   layoutState.signalYs = signalYs;
-  for (let i = 0; i < state.signals.length; i++) {
-    renderSignalLane(state.signals[i], signalYs[i], plotWidth, xOf, margin);
-  }
+  layoutState.firstSignalY = firstSignalY;
+  layoutState.signalsBlock = signalsBlock;
+  setupSignalCanvas();
+  paintSignalCanvas();
 
   // ---- Peaks ----
   for (const peak of state.peaks) {
@@ -444,127 +447,157 @@ function render() {
   }
 }
 
-// Signal lane: centered horizontal axis, positive scores mirrored above,
-// negative-score magnitudes mirrored below. Rendering is viewport-scoped —
-// we only walk bins that overlap the visible region (plus some padding), at
-// ~1 bin per CSS pixel. This makes both very fine detail at high zoom AND
-// panning cheap. Custom viewPosMax/viewNegMax clamp the display range so
-// tall outliers don't flatten the smaller peaks.
-function renderSignalLane(signal, laneTop, plotWidth, xOf, margin) {
+// ---------------------------------------------------------------------------
+// Canvas-based signal rendering
+// The canvas is viewport-sized and positioned over the signal lanes area.
+// On each scroll/zoom we just clear + repaint.
+// ---------------------------------------------------------------------------
+
+function setupSignalCanvas() {
+  if (state.signals.length === 0) {
+    signalCanvas.style.display = 'none';
+    return;
+  }
+  const dpr = window.devicePixelRatio || 1;
+  const viewWidth = container.clientWidth;
+  const canvasH = layoutState.signalsBlock || 0;
+  if (canvasH <= 0) {
+    signalCanvas.style.display = 'none';
+    return;
+  }
+  signalCanvas.style.display = 'block';
+  signalCanvas.style.width = `${viewWidth}px`;
+  signalCanvas.style.height = `${canvasH}px`;
+  // Use negative margin-top to pull the canvas up over the SVG signal region.
+  // The canvas sits after the SVG in the DOM, so we overlap it back up.
+  const svgHeight = svg.clientHeight || svg.getBoundingClientRect().height;
+  const overlapPx = svgHeight - layoutState.firstSignalY;
+  signalCanvas.style.marginTop = `-${overlapPx}px`;
+  signalCanvas.style.marginBottom = `${overlapPx - canvasH}px`;
+
+  signalCanvas.width = Math.round(viewWidth * dpr);
+  signalCanvas.height = Math.round(canvasH * dpr);
+  signalCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function paintSignalCanvas() {
+  if (state.signals.length === 0 || !layoutState.margin) return;
+  const dpr = window.devicePixelRatio || 1;
+  const viewWidth = container.clientWidth;
+  const canvasH = layoutState.signalsBlock || 0;
+  if (canvasH <= 0) return;
+
+  // Ensure canvas is sized for current viewport (handles resize).
+  const neededW = Math.round(viewWidth * dpr);
+  const neededH = Math.round(canvasH * dpr);
+  if (signalCanvas.width !== neededW || signalCanvas.height !== neededH) {
+    signalCanvas.width = neededW;
+    signalCanvas.height = neededH;
+    signalCanvas.style.width = `${viewWidth}px`;
+    signalCanvas.style.height = `${canvasH}px`;
+    signalCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  signalCtx.clearRect(0, 0, viewWidth, canvasH);
+
+  // The canvas is positioned at (left:0, top:firstSignalY) with sticky left.
+  // We need to account for scrollLeft when mapping data → canvas pixels.
+  const scrollLeft = container.scrollLeft;
+  const { margin, plotWidth } = layoutState;
+  const dataSpan = Math.max(1, state.dataMax - state.dataMin);
+
+  // xOf maps a data coord to SVG pixel space (absolute). We convert to
+  // canvas-local by subtracting scrollLeft.
+  const dataToCanvasX = (coord) =>
+    margin.left + ((coord - state.dataMin) / dataSpan) * plotWidth - scrollLeft;
+
+  for (let i = 0; i < state.signals.length; i++) {
+    paintSignalLane(state.signals[i], i, viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan);
+  }
+}
+
+function paintSignalLane(signal, laneIdx, viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan) {
   const {
     name, dataMin: sMin, dataMax: sMax,
     posData, negData, posMax, negMax,
     viewPosMax, viewNegMax,
   } = signal;
 
-  const centerY = laneTop + SIGNAL_LANE_HEIGHT / 2;
+  const laneLocalTop = laneIdx * (SIGNAL_LANE_HEIGHT + SIGNAL_LANE_GAP);
+  const centerY = laneLocalTop + SIGNAL_LANE_HEIGHT / 2;
   const halfH = SIGNAL_LANE_HEIGHT / 2;
 
-  const group = svgEl('g', { class: 'signal-lane' });
+  // Background
+  const bgLeft = Math.max(0, dataToCanvasX(state.dataMin));
+  const bgRight = Math.min(viewWidth, dataToCanvasX(state.dataMax));
+  if (bgRight > bgLeft) {
+    signalCtx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+    signalCtx.fillRect(bgLeft, laneLocalTop, bgRight - bgLeft, SIGNAL_LANE_HEIGHT);
+    signalCtx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    signalCtx.lineWidth = 1;
+    signalCtx.strokeRect(bgLeft, laneLocalTop, bgRight - bgLeft, SIGNAL_LANE_HEIGHT);
+  }
 
-  // Full-range background so empty stretches read as "no data" rather than
-  // as the parent chart backdrop.
-  group.appendChild(svgEl('rect', {
-    x: xOf(state.dataMin), y: laneTop,
-    width: Math.max(0, xOf(state.dataMax) - xOf(state.dataMin)),
-    height: SIGNAL_LANE_HEIGHT,
-    class: 'signal-lane-bg',
-  }));
-  group.appendChild(svgEl('line', {
-    x1: xOf(state.dataMin), x2: xOf(state.dataMax),
-    y1: centerY, y2: centerY,
-    class: 'signal-axis',
-  }));
+  // Center axis
+  signalCtx.beginPath();
+  signalCtx.moveTo(bgLeft, centerY);
+  signalCtx.lineTo(bgRight, centerY);
+  signalCtx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+  signalCtx.lineWidth = 1;
+  signalCtx.stroke();
 
   const effPosMax = viewPosMax != null ? viewPosMax : posMax;
   const effNegMax = viewNegMax != null ? viewNegMax : negMax;
 
-  // Clip work to the visible x range in data coordinates.
-  const dataSpan = Math.max(1, state.dataMax - state.dataMin);
-  const viewWidth = Math.max(1, container.clientWidth);
-  const padPx = viewWidth * SIGNAL_VIEWPORT_PAD_FRAC;
-  const visStartPx = Math.max(margin.left, container.scrollLeft - padPx);
-  const visEndPx = Math.min(
-    margin.left + plotWidth,
-    container.scrollLeft + viewWidth + padPx,
-  );
-  const visDataMin =
-    state.dataMin + ((visStartPx - margin.left) / plotWidth) * dataSpan;
-  const visDataMax =
-    state.dataMin + ((visEndPx - margin.left) / plotWidth) * dataSpan;
+  // Determine visible data range from scroll position.
+  const visStartPx = scrollLeft;
+  const visEndPx = scrollLeft + viewWidth;
+  const visDataMin = state.dataMin + ((visStartPx - margin.left) / plotWidth) * dataSpan;
+  const visDataMax = state.dataMin + ((visEndPx - margin.left) / plotWidth) * dataSpan;
 
   const rangeMin = Math.max(sMin, Math.floor(visDataMin));
   const rangeMax = Math.min(sMax, Math.ceil(visDataMax));
 
   if (rangeMin <= rangeMax) {
     const visSpanBp = rangeMax - rangeMin + 1;
-    const visSpanPx = Math.max(1, xOf(rangeMax) - xOf(rangeMin));
-    const targetBins = Math.min(
-      SIGNAL_MAX_BINS_PER_LANE,
-      Math.max(50, Math.round(visSpanPx * SIGNAL_BINS_PER_PX)),
-    );
+    // One bin per CSS pixel for the visible range
+    const targetBins = Math.min(SIGNAL_MAX_BINS_PER_LANE, Math.max(50, viewWidth));
     const binBp = Math.max(1, Math.ceil(visSpanBp / targetBins));
 
     if (effPosMax > 0) {
-      appendStepPath(
-        group, posData, sMin, rangeMin, rangeMax, binBp,
-        xOf, centerY, -halfH / effPosMax, effPosMax,
-        'signal-path signal-path-pos',
-      );
+      paintStepHist(posData, sMin, rangeMin, rangeMax, binBp,
+        dataToCanvasX, centerY, -halfH / effPosMax, effPosMax,
+        'rgba(244, 158, 76, 0.55)', '#f49e4c');
     }
     if (negData && effNegMax > 0) {
-      appendStepPath(
-        group, negData, sMin, rangeMin, rangeMax, binBp,
-        xOf, centerY, halfH / effNegMax, effNegMax,
-        'signal-path signal-path-neg',
-      );
+      paintStepHist(negData, sMin, rangeMin, rangeMax, binBp,
+        dataToCanvasX, centerY, halfH / effNegMax, effNegMax,
+        'rgba(120, 180, 255, 0.55)', '#78b4ff');
     }
   }
 
-  // Label follows the viewport left edge so the track name stays visible
-  // while panning.
-  const labelX = Math.min(
-    xOf(state.dataMax) - 4,
-    Math.max(xOf(state.dataMin) + 6, container.scrollLeft + margin.left + 6),
-  );
-  const label = svgEl('text', {
-    x: labelX,
-    y: laneTop + 12,
-    class: 'signal-label',
-  });
-  const rangeText = negData
-    ? `+${posMax} / -${negMax}`
-    : `max ${posMax}`;
-  label.textContent = `${name}  (${rangeText})`;
-  group.appendChild(label);
-
-  const title = svgEl('title');
-  title.textContent =
-    `${name}\n${sMin.toLocaleString()}\u2013${sMax.toLocaleString()} bp\n` +
-    `positive max ${posMax}` +
-    (negData ? `\nnegative max ${negMax}` : '');
-  group.appendChild(title);
-
-  svg.appendChild(group);
+  // Lane label (sticky to left edge)
+  const rangeText = negData ? `+${posMax} / -${negMax}` : `max ${posMax}`;
+  const labelText = `${name}  (${rangeText})`;
+  signalCtx.font = '700 11px system-ui, sans-serif';
+  signalCtx.lineWidth = 3;
+  signalCtx.strokeStyle = 'rgba(9, 12, 32, 0.75)';
+  signalCtx.fillStyle = 'rgba(230, 242, 255, 0.9)';
+  const labelX = Math.max(bgLeft + 6, 6);
+  signalCtx.strokeText(labelText, labelX, laneLocalTop + 12);
+  signalCtx.fillText(labelText, labelX, laneLocalTop + 12);
 }
 
-// Draws a step-histogram path for one half of a signal lane.
-// `yPerUnit` maps a data value → pixel offset from `baselineY`. Use a
-// negative value to draw upward from the baseline, positive to draw down.
-// Values above `cap` are clipped so the caller controls the visual ceiling.
-function appendStepPath(
-  group, data, sMin, rangeMin, rangeMax, binBp,
-  xOf, baselineY, yPerUnit, cap, className,
-) {
+function paintStepHist(data, sMin, rangeMin, rangeMax, binBp,
+  dataToCanvasX, baselineY, yPerUnit, cap, fillColor, strokeColor) {
   const startIdx = Math.max(0, rangeMin - sMin);
   const endIdx = Math.min(data.length - 1, rangeMax - sMin);
   if (startIdx > endIdx) return;
 
-  // Snap bin boundaries to multiples of binBp so pos/neg halves align.
   const startBin = Math.floor(startIdx / binBp);
   const endBin = Math.floor(endIdx / binBp);
 
-  const parts = [];
+  signalCtx.beginPath();
   let started = false;
   let lastX2 = 0;
 
@@ -580,24 +613,29 @@ function appendStepPath(
     }
     const clipped = m > cap ? cap : m;
 
-    const x1 = xOf(sMin + lo);
-    const x2 = xOf(sMin + hi + 1);
+    const x1 = dataToCanvasX(sMin + lo);
+    const x2 = dataToCanvasX(sMin + hi + 1);
     const y = baselineY + clipped * yPerUnit;
 
     if (!started) {
-      parts.push(`M${x1.toFixed(2)} ${baselineY.toFixed(2)}`);
-      parts.push(`L${x1.toFixed(2)} ${y.toFixed(2)}`);
+      signalCtx.moveTo(x1, baselineY);
+      signalCtx.lineTo(x1, y);
       started = true;
     } else {
-      parts.push(`L${x1.toFixed(2)} ${y.toFixed(2)}`);
+      signalCtx.lineTo(x1, y);
     }
-    parts.push(`L${x2.toFixed(2)} ${y.toFixed(2)}`);
+    signalCtx.lineTo(x2, y);
     lastX2 = x2;
   }
 
   if (started) {
-    parts.push(`L${lastX2.toFixed(2)} ${baselineY.toFixed(2)} Z`);
-    group.appendChild(svgEl('path', { d: parts.join(' '), class: className }));
+    signalCtx.lineTo(lastX2, baselineY);
+    signalCtx.closePath();
+    signalCtx.fillStyle = fillColor;
+    signalCtx.fill();
+    signalCtx.strokeStyle = strokeColor;
+    signalCtx.lineWidth = 0.8;
+    signalCtx.stroke();
   }
 }
 
@@ -605,14 +643,7 @@ function appendStepPath(
 // scroll handler (rAF-throttled) and after the user tweaks Y-axis caps.
 function renderSignalsOnly() {
   if (!layoutState.margin || state.signals.length === 0) return;
-  svg.querySelectorAll('g.signal-lane').forEach((n) => n.remove());
-  const { margin, plotWidth, signalYs } = layoutState;
-  const dataSpan = Math.max(1, state.dataMax - state.dataMin);
-  const xOf = (coord) =>
-    margin.left + ((coord - state.dataMin) / dataSpan) * plotWidth;
-  for (let i = 0; i < state.signals.length; i++) {
-    renderSignalLane(state.signals[i], signalYs[i], plotWidth, xOf, margin);
-  }
+  paintSignalCanvas();
 }
 
 // Builds one row of Y-axis cap inputs per signal underneath the toolbar.
@@ -791,15 +822,14 @@ container.addEventListener(
   { passive: false },
 );
 
-// Signal lanes render only the visible slice, so we redraw them on pan.
-// rAF-throttled so a burst of scroll events collapses to at most one repaint.
+// Signal canvas repaints on scroll — rAF-throttled.
 let signalScrollRafId = 0;
 container.addEventListener('scroll', () => {
   if (state.signals.length === 0) return;
   if (signalScrollRafId) return;
   signalScrollRafId = requestAnimationFrame(() => {
     signalScrollRafId = 0;
-    renderSignalsOnly();
+    paintSignalCanvas();
   });
 });
 

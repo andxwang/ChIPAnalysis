@@ -374,6 +374,14 @@ svg#chart {
   position: relative;
 }
 
+.signal-canvas {
+  position: sticky;
+  left: 0;
+  display: block;
+  pointer-events: none;
+  z-index: 1;
+}
+
 /* ---------------------------------------------------- Signal controls panel */
 
 .signal-controls {
