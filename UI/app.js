@@ -1028,9 +1028,8 @@ window.addEventListener('mouseup', (event) => {
   if (widthPx < 8 || state.dataMax <= state.dataMin) return;
 
   // Convert pixel positions to data coordinates, accounting for plot margins
-  const svgWidth = totalWidthPx();
   const margin = layoutState.margin || {left: 24, right: 24};
-  const plotWidth = svgWidth - margin.left - margin.right;
+  const plotWidth = layoutState.plotWidth || (totalWidthPx() - margin.left - margin.right);
   const dataSpan = state.dataMax - state.dataMin;
 
   const coordLeft =
