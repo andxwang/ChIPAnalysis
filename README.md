@@ -1,6 +1,6 @@
 ## Setup
 
-First, install (keeping simple as of now): `pip install -r requirements.txt`
+First, install (keeping simple as of now): `pip install -r requirements.txt`. Needed for analysis, but not UI.
 
 Fill in the correct file paths in `config.json`. E.g.:
 
@@ -18,8 +18,8 @@ Fill in the correct file paths in `config.json`. E.g.:
 }
 ```
 
-`proximity`: the maximum threshold of distance between a peak and gene to consider that peak to regulate that gene
-`operon_gap`: maximum threshold of distance between two genes to consider them an operon
+- `proximity`: the maximum threshold of distance between a peak and gene to consider that peak to regulate that gene
+- `operon_gap`: maximum threshold of distance between two genes to consider them an operon
 
 EXAMPLE folder structure: in folder like this:
 
@@ -40,6 +40,8 @@ python main.py
 ```
 
 Which will save the output to the output path you specified in `config.json`.
+
+You can also use cli arguments if you're familiar: `python main.py --help`
 
 ## To run the UI page:
 ```sh
