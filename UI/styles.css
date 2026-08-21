@@ -275,13 +275,6 @@ svg#chart {
   pointer-events: none;
 }
 
-.peak-lane-label {
-  fill: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
-  pointer-events: none;
-}
-
 .signal-lane-bg {
   fill: rgba(255, 255, 255, 0.04);
   stroke: rgba(255, 255, 255, 0.08);

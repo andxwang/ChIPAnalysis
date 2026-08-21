@@ -431,13 +431,6 @@ function render() {
   for (let laneIdx = 0; laneIdx < state.peaks.length; laneIdx++) {
     const lane = state.peaks[laneIdx];
     const peakY = firstPeakY + laneIdx * (peakHeight + laneGap);
-    const laneLabel = svgEl('text', {
-      x: margin.left,
-      y: peakY - 3,
-      class: 'peak-lane-label',
-    });
-    laneLabel.textContent = lane.name;
-    svg.appendChild(laneLabel);
 
     for (const peak of lane.peaks) {
       const x1 = xOf(peak.start);
@@ -479,13 +472,13 @@ function render() {
 // ---------------------------------------------------------------------------
 
 function setupSignalCanvas() {
-  if (state.signals.length === 0) {
+  if (state.signals.length === 0 && state.peaks.length === 0) {
     signalCanvas.style.display = 'none';
     return;
   }
   const dpr = window.devicePixelRatio || 1;
   const viewWidth = container.clientWidth;
-  const canvasH = layoutState.signalsBlock || 0;
+  const canvasH = signalCanvasHeight();
   if (canvasH <= 0) {
     signalCanvas.style.display = 'none';
     return;
@@ -506,10 +499,10 @@ function setupSignalCanvas() {
 }
 
 function paintSignalCanvas() {
-  if (state.signals.length === 0 || !layoutState.margin) return;
+  if ((state.signals.length === 0 && state.peaks.length === 0) || !layoutState.margin) return;
   const dpr = window.devicePixelRatio || 1;
   const viewWidth = container.clientWidth;
-  const canvasH = layoutState.signalsBlock || 0;
+  const canvasH = signalCanvasHeight();
   if (canvasH <= 0) return;
 
   // Ensure canvas is sized for current viewport (handles resize).
@@ -539,6 +532,26 @@ function paintSignalCanvas() {
   for (let i = 0; i < state.signals.length; i++) {
     paintSignalLane(state.signals[i], i, viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan);
   }
+
+  const peakTop = layoutState.signalsBlock || 0;
+  signalCtx.font = '700 10px system-ui, sans-serif';
+  signalCtx.lineWidth = 3;
+  signalCtx.strokeStyle = 'rgba(9, 12, 32, 0.75)';
+  signalCtx.fillStyle = 'rgba(230, 242, 255, 0.9)';
+  const peakLabelX = Math.max(6, dataToCanvasX(state.dataMin) + 6);
+  for (let i = 0; i < state.peaks.length; i++) {
+    const laneTop = peakTop + i * (18 + 10);
+    const label = state.peaks[i].name;
+    signalCtx.strokeText(label, peakLabelX, laneTop + 12);
+    signalCtx.fillText(label, peakLabelX, laneTop + 12);
+  }
+}
+
+function signalCanvasHeight() {
+  const peakBlock = state.peaks.length
+    ? (state.peaks.length * 18) + ((state.peaks.length - 1) * 10)
+    : 0;
+  return (layoutState.signalsBlock || 0) + peakBlock;
 }
 
 function paintSignalLane(signal, laneIdx, viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan) {
