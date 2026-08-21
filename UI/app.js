@@ -58,30 +58,38 @@ const layoutState = {
 
 async function loadDataFromFiles() {
   const genesFile = document.getElementById('genes-file').files[0];
-  const peaksFile = document.getElementById('peaks-file').files[0];
+  const peaksFiles = Array.from(
+    document.getElementById('peaks-file').files || [],
+  );
   const signalFiles = Array.from(
     document.getElementById('signals-file').files || [],
   );
 
-  if (!genesFile || !peaksFile) {
+  if (!genesFile || peaksFiles.length === 0) {
     status.textContent = 'Please select both files first.';
     return;
   }
 
   try {
-    const [genesText, peaksText, ...signalTexts] = await Promise.all([
+    const [genesText, ...fileTexts] = await Promise.all([
       readFileSmart(genesFile),
-      readFileSmart(peaksFile),
+      ...peaksFiles.map(readFileSmart),
       ...signalFiles.map(readFileSmart),
     ]);
+    const peakTexts = fileTexts.slice(0, peaksFiles.length);
+    const signalTexts = fileTexts.slice(peaksFiles.length);
 
     state.genes = parseGenes(genesText);
-    state.peaks = parsePeaks(peaksText);
+    state.peaks = peakTexts.map((text, i) => ({
+      name: peaksFiles[i].name,
+      peaks: parsePeaks(text),
+    }));
     state.signals = signalTexts
       .map((text, i) => parseSignal(text, signalFiles[i].name))
       .filter(Boolean);
 
-    if (state.genes.length === 0 && state.peaks.length === 0) {
+    const peakCount = state.peaks.reduce((total, lane) => total + lane.peaks.length, 0);
+    if (state.genes.length === 0 && peakCount === 0) {
       status.textContent = 'No features found in the provided files.';
       return;
     }
@@ -104,7 +112,8 @@ async function loadDataFromFiles() {
       ? `, ${state.signals.length} signal track${state.signals.length > 1 ? 's' : ''}`
       : '';
     status.textContent =
-      `Loaded ${state.genes.length} genes and ${state.peaks.length} peaks${signalMsg}.`;
+      `Loaded ${state.genes.length} genes and ${peakCount} peaks across ` +
+      `${state.peaks.length} peak lane${state.peaks.length > 1 ? 's' : ''}${signalMsg}.`;
   } catch (err) {
     console.error(err);
     status.textContent = `Failed to load files: ${err.message}`;
@@ -233,9 +242,11 @@ function computeDataExtent(genes, peaks, signals = []) {
     if (g.start < min) min = g.start;
     if (g.end > max) max = g.end;
   }
-  for (const p of peaks) {
-    if (p.start < min) min = p.start;
-    if (p.end > max) max = p.end;
+  for (const lane of peaks) {
+    for (const p of lane.peaks) {
+      if (p.start < min) min = p.start;
+      if (p.end > max) max = p.end;
+    }
   }
   for (const s of signals) {
     if (s.dataMin < min) min = s.dataMin;
@@ -315,7 +326,9 @@ function render() {
   // Extra vertical space needed to fit the histogram lanes.
   const signalsBlock = state.signals.length
     * (SIGNAL_LANE_HEIGHT + SIGNAL_LANE_GAP);
-  const plotHeight = basePlotHeight + signalsBlock;
+  const peakLaneExtra = Math.max(0, state.peaks.length - 1)
+    * (peakHeight + laneGap);
+  const plotHeight = basePlotHeight + signalsBlock + peakLaneExtra;
   const height = plotHeight + margin.top + margin.bottom;
   const plotWidth = width - margin.left - margin.right;
 
@@ -340,7 +353,7 @@ function render() {
   const signalYs = state.signals.map(
     (_, i) => firstSignalY + i * (SIGNAL_LANE_HEIGHT + SIGNAL_LANE_GAP),
   );
-  const peakY = state.signals.length
+  const firstPeakY = state.signals.length
     ? signalYs[signalYs.length - 1] + SIGNAL_LANE_HEIGHT + SIGNAL_LANE_GAP
     : axisY + laneGap + laneHeight + 14;
 
@@ -415,35 +428,47 @@ function render() {
   paintSignalCanvas();
 
   // ---- Peaks ----
-  for (const peak of state.peaks) {
-    const x1 = xOf(peak.start);
-    const x2 = xOf(peak.end);
-    const w = Math.max(2, x2 - x1);
+  for (let laneIdx = 0; laneIdx < state.peaks.length; laneIdx++) {
+    const lane = state.peaks[laneIdx];
+    const peakY = firstPeakY + laneIdx * (peakHeight + laneGap);
+    const laneLabel = svgEl('text', {
+      x: margin.left,
+      y: peakY - 3,
+      class: 'peak-lane-label',
+    });
+    laneLabel.textContent = lane.name;
+    svg.appendChild(laneLabel);
 
-    const group = svgEl('g', { class: 'feature peak' });
-    group.appendChild(svgEl('rect', {
-      x: Math.min(x1, x2), y: peakY,
-      width: w, height: peakHeight,
-      rx: 3, class: 'peak-bar',
-    }));
+    for (const peak of lane.peaks) {
+      const x1 = xOf(peak.start);
+      const x2 = xOf(peak.end);
+      const w = Math.max(2, x2 - x1);
 
-    if (w >= LABEL_MIN_WIDTH_PX && peak.score !== null) {
-      const label = svgEl('text', {
-        x: Math.min(x1, x2) + 6,
-        y: peakY + peakHeight / 2 + 4,
-        class: 'peak-label',
-      });
-      label.textContent = peak.score.toFixed(3);
-      group.appendChild(label);
+      const group = svgEl('g', { class: 'feature peak' });
+      group.appendChild(svgEl('rect', {
+        x: Math.min(x1, x2), y: peakY,
+        width: w, height: peakHeight,
+        rx: 3, class: 'peak-bar',
+      }));
+
+      if (w >= LABEL_MIN_WIDTH_PX && peak.score !== null) {
+        const label = svgEl('text', {
+          x: Math.min(x1, x2) + 6,
+          y: peakY + peakHeight / 2 + 4,
+          class: 'peak-label',
+        });
+        label.textContent = peak.score.toFixed(3);
+        group.appendChild(label);
+      }
+
+      const title = svgEl('title');
+      title.textContent =
+        `${lane.name}\nPeak\n${peak.start.toLocaleString()}\u2013${peak.end.toLocaleString()} bp` +
+        (peak.score !== null ? `\nScore: ${peak.score}` : '');
+      group.appendChild(title);
+
+      svg.appendChild(group);
     }
-
-    const title = svgEl('title');
-    title.textContent =
-      `Peak\n${peak.start.toLocaleString()}\u2013${peak.end.toLocaleString()} bp` +
-      (peak.score !== null ? `\nScore: ${peak.score}` : '');
-    group.appendChild(title);
-
-    svg.appendChild(group);
   }
 }
 
