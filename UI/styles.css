@@ -395,6 +395,36 @@ svg#chart {
   margin-top: 4px;
 }
 
+.color-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.color-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.color-control input[type="color"] {
+  width: 32px;
+  height: 24px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
 .signal-controls-heading {
   color: var(--muted);
   font-size: 0.78rem;

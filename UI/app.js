@@ -39,6 +39,12 @@ const state = {
   genes: [],
   peaks: [],
   signals: [],
+  colors: {
+    gene: '#2e9f57',
+    peak: '#3b82f6',
+    signalPositive: '#f49e4c',
+    signalNegative: '#78b4ff',
+  },
   dataMin: 0,
   dataMax: 1,
   zoom: 1,
@@ -270,6 +276,22 @@ function svgEl(tag, attrs = {}) {
     el.setAttribute(k, String(v));
   }
   return el;
+}
+
+function hexToRgba(hex, alpha) {
+  const value = hex.replace('#', '');
+  const red = parseInt(value.slice(0, 2), 16);
+  const green = parseInt(value.slice(2, 4), 16);
+  const blue = parseInt(value.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function applyColors() {
+  document.documentElement.style.setProperty('--gene', state.colors.gene);
+  document.documentElement.style.setProperty('--gene-hover', state.colors.gene);
+  document.documentElement.style.setProperty('--peak', state.colors.peak);
+  document.documentElement.style.setProperty('--peak-hover', state.colors.peak);
+  renderSignalsOnly();
 }
 
 function getNiceTickStep(span, targetTicks = 10) {
@@ -605,12 +627,12 @@ function paintSignalLane(signal, laneIdx, viewWidth, scrollLeft, dataToCanvasX, 
     if (effPosMax > 0) {
       paintStepHist(posData, sMin, rangeMin, rangeMax, binBp,
         dataToCanvasX, centerY, -halfH / effPosMax, effPosMax,
-        'rgba(244, 158, 76, 0.55)', '#f49e4c');
+        hexToRgba(state.colors.signalPositive, 0.55), state.colors.signalPositive);
     }
     if (negData && effNegMax > 0) {
       paintStepHist(negData, sMin, rangeMin, rangeMax, binBp,
         dataToCanvasX, centerY, halfH / effNegMax, effNegMax,
-        'rgba(120, 180, 255, 0.55)', '#78b4ff');
+        hexToRgba(state.colors.signalNegative, 0.55), state.colors.signalNegative);
     }
   }
 
@@ -840,6 +862,19 @@ document.getElementById('pan-right').addEventListener('click', () =>
   panByPixels(container.clientWidth * 0.6),
 );
 document.getElementById('load-files').addEventListener('click', loadDataFromFiles);
+
+const colorInputs = [
+  ['gene-color', 'gene'],
+  ['peak-color', 'peak'],
+  ['signal-positive-color', 'signalPositive'],
+  ['signal-negative-color', 'signalNegative'],
+];
+for (const [id, colorName] of colorInputs) {
+  document.getElementById(id).addEventListener('input', (event) => {
+    state.colors[colorName] = event.target.value;
+    applyColors();
+  });
+}
 
 // Ctrl/Cmd + wheel → zoom toward cursor. Plain wheel → horizontal pan.
 container.addEventListener(
