@@ -270,10 +270,12 @@ svg#chart {
 .gene-label,
 .peak-label {
   font-size: 11px;
-  fill: #e4e4e4;
   font-weight: 700;
   pointer-events: none;
 }
+
+.gene-label { fill: var(--gene-label, #e4e4e4); }
+.peak-label { fill: var(--peak-label, #e4e4e4); }
 
 .signal-lane-bg {
   fill: rgba(255, 255, 255, 0.04);

@@ -286,11 +286,27 @@ function hexToRgba(hex, alpha) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
+function contrastingTextColor(hex) {
+  const value = hex.replace('#', '');
+  const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255);
+  const luminance = channels.reduce((total, channel, index) => {
+    const linear = channel <= 0.04045
+      ? channel / 12.92
+      : ((channel + 0.055) / 1.055) ** 2.4;
+    return total + linear * [0.2126, 0.7152, 0.0722][index];
+  }, 0);
+  const contrastWithBlack = (luminance + 0.05) / 0.05;
+  const contrastWithWhite = 1.05 / (luminance + 0.05);
+  return contrastWithBlack >= contrastWithWhite ? '#000000' : '#ffffff';
+}
+
 function applyColors() {
   document.documentElement.style.setProperty('--gene', state.colors.gene);
   document.documentElement.style.setProperty('--gene-hover', state.colors.gene);
+  document.documentElement.style.setProperty('--gene-label', contrastingTextColor(state.colors.gene));
   document.documentElement.style.setProperty('--peak', state.colors.peak);
   document.documentElement.style.setProperty('--peak-hover', state.colors.peak);
+  document.documentElement.style.setProperty('--peak-label', contrastingTextColor(state.colors.peak));
   renderSignalsOnly();
 }
 
