@@ -384,6 +384,81 @@ svg#chart {
   z-index: 1;
 }
 
+/* ---------------------------------------------------- Lane reorder handles */
+
+/* Overlay layer that sits above the chart-scroll but stays fixed to the
+   viewport (chart-frame does not scroll). Individual handles are absolute
+   children positioned at each lane's Y. Pointer events are enabled only on
+   the handles themselves so normal chart interactions are unaffected. */
+.lane-handles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.lane-handle {
+  position: absolute;
+  width: 14px;
+  min-height: 22px;
+  background: rgba(75, 124, 184, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  cursor: grab;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.12s ease, transform 0.12s ease, background 0.12s ease;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  line-height: 1;
+  user-select: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.lane-handle.left  { left: 4px; }
+.lane-handle.right { right: 4px; }
+
+.lane-handle::before {
+  content: '⋮⋮';
+  letter-spacing: -3px;
+  pointer-events: none;
+}
+
+.lane-handle.visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.lane-handle:hover {
+  background: rgba(107, 165, 255, 0.95);
+}
+
+.lane-handle:active,
+.lane-handle.dragging {
+  cursor: grabbing;
+  background: rgba(107, 165, 255, 1);
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Blue line shown between lanes during a drag to indicate the drop slot. */
+.lane-drop-indicator {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 3px;
+  margin-top: -1.5px;
+  background: #6aa5ff;
+  border-radius: 2px;
+  box-shadow: 0 0 10px rgba(107, 165, 255, 0.85);
+  pointer-events: none;
+  z-index: 25;
+}
+
 /* ---------------------------------------------------- Signal controls panel */
 
 .signal-controls {

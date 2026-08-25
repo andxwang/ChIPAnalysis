@@ -48,14 +48,33 @@ const state = {
   dataMin: 0,
   dataMax: 1,
   zoom: 1,
+  // Order of lanes from top to bottom. Each entry: { kind, index?, key }.
+  // kind ∈ { 'gene+', 'gene-', 'signal', 'peak' }. `key` is unique per lane.
+  // Reset to null on data load so defaultLaneOrder() rebuilds it.
+  laneOrder: null,
 };
+
+// Per-lane vertical size in SVG pixels. Signal lanes are much taller since
+// they contain a histogram, not just a bar. LANE_GAP is the vertical space
+// inserted between adjacent lanes.
+const LANE_HEIGHTS = {
+  'gene+': 22,
+  'gene-': 22,
+  signal: SIGNAL_LANE_HEIGHT,
+  peak: 18,
+};
+const LANE_GAP = 10;
+// Gene strand lanes move as one group, keeping + above −.
+const GENE_GROUP_KEY = 'gene-group';
 
 // Saved geometry from the last render() so we can re-render only the signal
 // lanes on scroll without recomputing the full layout.
 const layoutState = {
   margin: null,
   plotWidth: 0,
-  signalYs: [],
+  plotHeight: 0,
+  laneRects: null, // Map<laneKey, { top, height, kind, index, key }>
+  handleEls: null, // Map<laneKey, HTMLDivElement[]>
 };
 
 // ---------------------------------------------------------------------------
@@ -93,6 +112,8 @@ async function loadDataFromFiles() {
     state.signals = signalTexts
       .map((text, i) => parseSignal(text, signalFiles[i].name))
       .filter(Boolean);
+    // Data changed — reset lane order so it's regenerated with the new lanes.
+    state.laneOrder = null;
 
     const peakCount = state.peaks.reduce((total, lane) => total + lane.peaks.length, 0);
     if (state.genes.length === 0 && peakCount === 0) {
@@ -352,21 +373,19 @@ function clearRuler() {
 
 function render() {
   clearRuler();
+  syncLaneOrder();
+
   const dataSpan = Math.max(1, state.dataMax - state.dataMin);
   const width = totalWidthPx();
   const margin = { top: 24, right: 24, bottom: 46, left: 24 };
 
-  const laneHeight = 22;
-  const laneGap = 10;
-  const peakHeight = 18;
-  const basePlotHeight = 120; // preserves original no-signal layout exactly
-
-  // Extra vertical space needed to fit the histogram lanes.
-  const signalsBlock = state.signals.length
-    * (SIGNAL_LANE_HEIGHT + SIGNAL_LANE_GAP);
-  const peakLaneExtra = Math.max(0, state.peaks.length - 1)
-    * (peakHeight + laneGap);
-  const plotHeight = basePlotHeight + signalsBlock + peakLaneExtra;
+  // Compute a Y rect per lane based on state.laneOrder. This is the single
+  // source of truth for every renderer (SVG genes/peaks, canvas signals,
+  // and lane-handle overlays).
+  const { laneRects, blockHeight } = computeLaneLayout(margin.top);
+  // Preserve a minimum plot height (matches original layout) so the empty
+  // state and datasets without signals still look reasonable.
+  const plotHeight = Math.max(120, blockHeight);
   const height = plotHeight + margin.top + margin.bottom;
   const plotWidth = width - margin.left - margin.right;
 
@@ -379,21 +398,6 @@ function render() {
 
   const xOf = (coord) =>
     margin.left + ((coord - state.dataMin) / dataSpan) * plotWidth;
-
-  // Gene lane geometry (unchanged from the original layout).
-  const axisY = margin.top + basePlotHeight / 2;
-  const forwardY = axisY - laneGap - laneHeight;
-  const reverseY = axisY + laneGap;
-
-  // Signal lanes stack directly below the reverse-strand gene lane. When
-  // there are no signals, peakY falls back to its original position.
-  const firstSignalY = reverseY + laneHeight + SIGNAL_LANE_GAP;
-  const signalYs = state.signals.map(
-    (_, i) => firstSignalY + i * (SIGNAL_LANE_HEIGHT + SIGNAL_LANE_GAP),
-  );
-  const firstPeakY = state.signals.length
-    ? signalYs[signalYs.length - 1] + SIGNAL_LANE_HEIGHT + SIGNAL_LANE_GAP
-    : axisY + laneGap + laneHeight + 14;
 
   // ---- Grid & ticks ----
   const targetTicks = Math.max(6, Math.round(plotWidth / 110));
@@ -415,31 +419,30 @@ function render() {
     svg.appendChild(label);
   }
 
-  // ---- Central axis ----
-  svg.appendChild(svgEl('line', {
-    x1: margin.left, x2: margin.left + plotWidth,
-    y1: axisY, y2: axisY,
-    class: 'axis-line',
-  }));
-
   // ---- Genes ----
+  // Draw each gene into whichever strand lane exists in the current order.
+  // Lanes may be absent (e.g. peaks-only view) — skip genes with no lane.
+  const genePosRect = laneRects.get('gene+');
+  const geneNegRect = laneRects.get('gene-');
   for (const gene of state.genes) {
+    const rect = gene.direction === '+' ? genePosRect : geneNegRect;
+    if (!rect) continue;
     const x1 = xOf(gene.start);
     const x2 = xOf(gene.end);
     const w = Math.max(2, x2 - x1);
-    const y = gene.direction === '+' ? forwardY : reverseY;
+    const y = rect.top;
 
     const group = svgEl('g', { class: 'feature gene' });
     group.appendChild(svgEl('rect', {
       x: Math.min(x1, x2), y,
-      width: w, height: laneHeight,
+      width: w, height: rect.height,
       rx: 4, class: 'gene-bar',
     }));
 
     if (w >= LABEL_MIN_WIDTH_PX) {
       const label = svgEl('text', {
         x: Math.min(x1, x2) + 6,
-        y: y + laneHeight / 2 + 4,
+        y: y + rect.height / 2 + 4,
         class: 'gene-label',
       });
       label.textContent = gene.name;
@@ -459,16 +462,17 @@ function render() {
   // ---- Signal histograms (canvas-based) ----
   layoutState.margin = margin;
   layoutState.plotWidth = plotWidth;
-  layoutState.signalYs = signalYs;
-  layoutState.firstSignalY = firstSignalY;
-  layoutState.signalsBlock = signalsBlock;
+  layoutState.plotHeight = plotHeight;
+  layoutState.laneRects = laneRects;
   setupSignalCanvas();
   paintSignalCanvas();
 
   // ---- Peaks ----
-  for (let laneIdx = 0; laneIdx < state.peaks.length; laneIdx++) {
-    const lane = state.peaks[laneIdx];
-    const peakY = firstPeakY + laneIdx * (peakHeight + laneGap);
+  for (const [, rect] of laneRects) {
+    if (rect.kind !== 'peak') continue;
+    const lane = state.peaks[rect.index];
+    if (!lane) continue;
+    const peakY = rect.top;
 
     for (const peak of lane.peaks) {
       const x1 = xOf(peak.start);
@@ -478,14 +482,14 @@ function render() {
       const group = svgEl('g', { class: 'feature peak' });
       group.appendChild(svgEl('rect', {
         x: Math.min(x1, x2), y: peakY,
-        width: w, height: peakHeight,
+        width: w, height: rect.height,
         rx: 3, class: 'peak-bar',
       }));
 
       if (w >= LABEL_MIN_WIDTH_PX && peak.score !== null) {
         const label = svgEl('text', {
           x: Math.min(x1, x2) + 6,
-          y: peakY + peakHeight / 2 + 4,
+          y: peakY + rect.height / 2 + 4,
           class: 'peak-label',
         });
         label.textContent = peak.score.toFixed(3);
@@ -501,6 +505,59 @@ function render() {
       svg.appendChild(group);
     }
   }
+
+  // ---- Draggable lane handles overlay ----
+  buildLaneHandles(laneRects, margin);
+}
+
+// Build the default lane order for the current dataset. Skips gene lanes
+// when no genes are loaded so peaks-only views don't have empty strand rows.
+function defaultLaneOrder() {
+  const order = [];
+  if (state.genes.length > 0) {
+    order.push({ kind: 'gene+', key: 'gene+' });
+    order.push({ kind: 'gene-', key: 'gene-' });
+  }
+  state.signals.forEach((_, i) => order.push({ kind: 'signal', index: i, key: `signal:${i}` }));
+  state.peaks.forEach((_, i) => order.push({ kind: 'peak', index: i, key: `peak:${i}` }));
+  return order;
+}
+
+// Reconciles state.laneOrder with the currently-loaded data. Keeps any
+// user reordering intact across re-renders, drops stale keys, and appends
+// any newly-added lanes at the end. Gene strand lanes are always forced
+// to the top of the order (+ above −), regardless of prior state.
+function syncLaneOrder() {
+  const defaults = defaultLaneOrder();
+  const wanted = new Set(defaults.map((d) => d.key));
+  const existing = (state.laneOrder || []).filter((l) => wanted.has(l.key));
+  const have = new Set(existing.map((l) => l.key));
+  const missing = defaults.filter((d) => !have.has(d.key));
+  const merged = [...existing, ...missing];
+    state.laneOrder = merged;
+}
+
+// Assigns a { top, height, kind, index } rect to each lane based on its
+// position in state.laneOrder. Returns a Map keyed by lane key plus the
+// total height of the lane block (for sizing the plot).
+function computeLaneLayout(startY) {
+  const laneRects = new Map();
+  let y = startY;
+  let first = true;
+  for (const lane of state.laneOrder) {
+    const h = LANE_HEIGHTS[lane.kind] ?? 20;
+    if (!first) y += LANE_GAP;
+    laneRects.set(lane.key, {
+      top: y,
+      height: h,
+      kind: lane.kind,
+      index: lane.index,
+      key: lane.key,
+    });
+    y += h;
+    first = false;
+  }
+  return { laneRects, blockHeight: first ? 0 : y - startY };
 }
 
 // ---------------------------------------------------------------------------
@@ -524,10 +581,13 @@ function setupSignalCanvas() {
   signalCanvas.style.display = 'block';
   signalCanvas.style.width = `${viewWidth}px`;
   signalCanvas.style.height = `${canvasH}px`;
-  // Use negative margin-top to pull the canvas up over the SVG signal region.
-  // The canvas sits after the SVG in the DOM, so we overlap it back up.
+  // The canvas now covers the entire plot area (from margin.top down to
+  // the bottom of the lane block) so signal + peak lanes can appear
+  // anywhere in the lane order. We pull it up over the SVG with a
+  // negative margin-top and compensate with margin-bottom so its flow
+  // height stays zero.
   const svgHeight = svg.clientHeight || svg.getBoundingClientRect().height;
-  const overlapPx = svgHeight - layoutState.firstSignalY;
+  const overlapPx = svgHeight - layoutState.margin.top;
   signalCanvas.style.marginTop = `-${overlapPx}px`;
   signalCanvas.style.marginBottom = `${overlapPx - canvasH}px`;
 
@@ -556,10 +616,9 @@ function paintSignalCanvas() {
 
   signalCtx.clearRect(0, 0, viewWidth, canvasH);
 
-  // The canvas is positioned at (left:0, top:firstSignalY) with sticky left.
-  // We need to account for scrollLeft when mapping data → canvas pixels.
   const scrollLeft = container.scrollLeft;
-  const { margin, plotWidth } = layoutState;
+  const { margin, plotWidth, laneRects } = layoutState;
+  if (!laneRects) return;
   const dataSpan = Math.max(1, state.dataMax - state.dataMin);
 
   // xOf maps a data coord to SVG pixel space (absolute). We convert to
@@ -567,39 +626,44 @@ function paintSignalCanvas() {
   const dataToCanvasX = (coord) =>
     margin.left + ((coord - state.dataMin) / dataSpan) * plotWidth - scrollLeft;
 
-  for (let i = 0; i < state.signals.length; i++) {
-    paintSignalLane(state.signals[i], i, viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan);
+  // Signal lanes may now sit anywhere in the lane order — resolve each
+  // lane's top position from the lane rects. Canvas-local Y = rect.top
+  // minus margin.top (since the canvas top edge is at margin.top).
+  for (const [, rect] of laneRects) {
+    if (rect.kind !== 'signal') continue;
+    const signal = state.signals[rect.index];
+    if (!signal) continue;
+    paintSignalLane(signal, rect.top - margin.top,
+      viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan);
   }
 
-  const peakTop = layoutState.signalsBlock || 0;
+  // Sticky peak-lane labels, positioned at each peak lane's Y.
   signalCtx.font = '700 10px system-ui, sans-serif';
   signalCtx.lineWidth = 3;
   signalCtx.strokeStyle = 'rgba(9, 12, 32, 0.75)';
   signalCtx.fillStyle = 'rgba(230, 242, 255, 0.9)';
   const peakLabelX = Math.max(6, dataToCanvasX(state.dataMin) + 6);
-  for (let i = 0; i < state.peaks.length; i++) {
-    const laneTop = peakTop + i * (18 + 10);
-    const label = state.peaks[i].name;
-    signalCtx.strokeText(label, peakLabelX, laneTop + 12);
-    signalCtx.fillText(label, peakLabelX, laneTop + 12);
+  for (const [, rect] of laneRects) {
+    if (rect.kind !== 'peak') continue;
+    const lane = state.peaks[rect.index];
+    if (!lane) continue;
+    const laneTop = rect.top - margin.top;
+    signalCtx.strokeText(lane.name, peakLabelX, laneTop + 12);
+    signalCtx.fillText(lane.name, peakLabelX, laneTop + 12);
   }
 }
 
 function signalCanvasHeight() {
-  const peakBlock = state.peaks.length
-    ? (state.peaks.length * 18) + ((state.peaks.length - 1) * 10)
-    : 0;
-  return (layoutState.signalsBlock || 0) + peakBlock;
+  return layoutState.plotHeight || 0;
 }
 
-function paintSignalLane(signal, laneIdx, viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan) {
+function paintSignalLane(signal, laneLocalTop, viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan) {
   const {
     name, dataMin: sMin, dataMax: sMax,
     posData, negData, posMax, negMax,
     viewPosMax, viewNegMax,
   } = signal;
 
-  const laneLocalTop = laneIdx * (SIGNAL_LANE_HEIGHT + SIGNAL_LANE_GAP);
   const centerY = laneLocalTop + SIGNAL_LANE_HEIGHT / 2;
   const halfH = SIGNAL_LANE_HEIGHT / 2;
 
@@ -1153,3 +1217,220 @@ window.addEventListener('mouseup', (event) => {
     Math.min(newSvgWidth - container.clientWidth, newScrollLeft),
   );
 });
+
+// ---------------------------------------------------------------------------
+// Lane reordering (drag handles)
+//
+// Every lane in the chart can be reordered by grabbing a small handle that
+// appears on the left or right edge when the pointer is over that lane. The
+// two gene-strand rows use one grouped handle so + and - move together.
+// ---------------------------------------------------------------------------
+
+const chartFrame = document.querySelector('.chart-frame');
+const handlesContainer = document.getElementById('lane-handles');
+const dropIndicator = document.getElementById('lane-drop-indicator');
+let laneDragState = null;
+
+function laneLabelFor(rect) {
+  if (rect.kind === 'gene-group') return 'genes';
+  if (rect.kind === 'gene+') return 'gene + strand';
+  if (rect.kind === 'gene-') return 'gene − strand';
+  if (rect.kind === 'signal') return state.signals[rect.index]?.name ?? 'signal';
+  if (rect.kind === 'peak')   return state.peaks[rect.index]?.name ?? 'peak';
+  return 'lane';
+}
+
+// The lane rects use SVG coordinates (y=0 at top of SVG). To translate
+// them to chart-frame coordinates we add the SVG's top offset within
+// chart-frame (i.e. any chart-scroll border / padding).
+function svgTopInFrame() {
+  const svgRect = svg.getBoundingClientRect();
+  const frameRect = chartFrame.getBoundingClientRect();
+  return svgRect.top - frameRect.top;
+}
+
+function buildLaneHandles(laneRects, margin) {
+  handlesContainer.replaceChildren();
+  const handleEls = new Map();
+  if (!laneRects || laneRects.size === 0) {
+    layoutState.handleEls = handleEls;
+    return;
+  }
+  const yOffset = svgTopInFrame();
+  const genePositive = laneRects.get('gene+');
+  const geneNegative = laneRects.get('gene-');
+  for (const [key, rect] of laneRects) {
+    if (rect.kind === 'gene-') continue;
+    const isGeneGroup = rect.kind === 'gene+' && geneNegative;
+    const handleKey = isGeneGroup ? GENE_GROUP_KEY : key;
+    const handleTop = isGeneGroup ? genePositive.top : rect.top;
+    const handleHeight = isGeneGroup
+      ? geneNegative.top + geneNegative.height - genePositive.top
+      : rect.height;
+    const els = [];
+    const sides = ['left', 'right'];
+    for (const side of sides) {
+      const el = document.createElement('div');
+      el.className = `lane-handle ${side}`;
+      el.dataset.laneKey = handleKey;
+      el.style.top = `${yOffset + handleTop}px`;
+      el.style.height = `${handleHeight}px`;
+      el.title = `Drag to reorder ${laneLabelFor(isGeneGroup ? { kind: 'gene-group' } : rect)}`;
+      el.addEventListener('mousedown', (ev) => startLaneDrag(ev, handleKey));
+      handlesContainer.appendChild(el);
+      els.push(el);
+    }
+    handleEls.set(handleKey, els);
+  }
+  layoutState.handleEls = handleEls;
+}
+
+function setHandleVisibility(hoveredKey) {
+  if (!layoutState.handleEls) return;
+  for (const [key, els] of layoutState.handleEls) {
+    const on = key === hoveredKey;
+    for (const el of els) el.classList.toggle('visible', on);
+  }
+}
+
+function hideAllHandles() {
+  setHandleVisibility(null);
+}
+
+// Determine which lane the pointer is over (in chart-frame Y coords).
+function laneKeyAtY(y) {
+  if (!layoutState.laneRects) return null;
+  const yOffset = svgTopInFrame();
+  const genePositive = layoutState.laneRects.get('gene+');
+  const geneNegative = layoutState.laneRects.get('gene-');
+  if (genePositive && geneNegative) {
+    const geneTop = yOffset + genePositive.top;
+    const geneBottom = yOffset + geneNegative.top + geneNegative.height;
+    if (y >= geneTop && y <= geneBottom) return GENE_GROUP_KEY;
+  }
+  for (const [key, rect] of layoutState.laneRects) {
+    if (rect.kind === 'gene+' || rect.kind === 'gene-') continue;
+    const top = yOffset + rect.top;
+    if (y >= top && y <= top + rect.height) return key;
+  }
+  return null;
+}
+
+chartFrame.addEventListener('mousemove', (ev) => {
+  if (laneDragState) return; // hover suppressed during drag
+  const rect = chartFrame.getBoundingClientRect();
+  const y = ev.clientY - rect.top;
+  setHandleVisibility(laneKeyAtY(y));
+});
+
+chartFrame.addEventListener('mouseleave', () => {
+  if (laneDragState) return;
+  hideAllHandles();
+});
+
+function startLaneDrag(ev, laneKey) {
+  if (ev.button !== 0) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const fromIdx = laneKey === GENE_GROUP_KEY
+    ? state.laneOrder.findIndex((l) => l.kind === 'gene+')
+    : state.laneOrder.findIndex((l) => l.key === laneKey);
+  if (fromIdx === -1) return;
+
+  const handleEls = layoutState.handleEls?.get(laneKey) ?? [];
+  for (const el of handleEls) el.classList.add('dragging', 'visible');
+
+  laneDragState = {
+    laneKey,
+    fromIdx,
+    groupSize: laneKey === GENE_GROUP_KEY ? 2 : 1,
+    dropIdx: fromIdx,
+  };
+  document.body.style.cursor = 'grabbing';
+
+  const rect = chartFrame.getBoundingClientRect();
+  const y = ev.clientY - rect.top;
+  updateDropTarget(y);
+
+  window.addEventListener('mousemove', onLaneDragMove);
+  window.addEventListener('mouseup', endLaneDrag);
+}
+
+function onLaneDragMove(ev) {
+  if (!laneDragState) return;
+  const rect = chartFrame.getBoundingClientRect();
+  const y = ev.clientY - rect.top;
+  updateDropTarget(y);
+}
+
+function updateDropTarget(y) {
+  const dropIdx = computeDropIndex(y);
+  laneDragState.dropIdx = dropIdx;
+  const insertY = computeInsertY(dropIdx);
+  dropIndicator.style.top = `${insertY}px`;
+  dropIndicator.hidden = false;
+}
+
+// Given a cursor Y (chart-frame coords), find the insertion index in
+// state.laneOrder where the dragged lane should land. An index of N
+// means "after the last lane". The gene rows are treated as one slot.
+function computeDropIndex(y) {
+  const yOffset = svgTopInFrame();
+  const order = state.laneOrder;
+  let idx = order.length;
+  for (let i = 0; i < order.length; i++) {
+    if (order[i].kind === 'gene-') continue;
+    const r = layoutState.laneRects.get(order[i].key);
+    if (!r) continue;
+    const geneNegative = order[i].kind === 'gene+' ? layoutState.laneRects.get('gene-') : null;
+    const bottom = geneNegative ? geneNegative.top + geneNegative.height : r.top + r.height;
+    const midY = yOffset + (r.top + bottom) / 2;
+    if (y < midY) { idx = i; break; }
+  }
+  return idx === 1 ? 2 : idx;
+}
+
+// Y (in chart-frame coords) where the drop-indicator line should render
+// for a given insertion index — halfway between the neighbouring lanes.
+function computeInsertY(idx) {
+  const yOffset = svgTopInFrame();
+  const order = state.laneOrder;
+  if (order.length === 0) return yOffset;
+  if (idx <= 0) {
+    const first = layoutState.laneRects.get(order[0].key);
+    return yOffset + first.top - LANE_GAP / 2;
+  }
+  if (idx >= order.length) {
+    const last = layoutState.laneRects.get(order[order.length - 1].key);
+    return yOffset + last.top + last.height + LANE_GAP / 2;
+  }
+  const prev = layoutState.laneRects.get(order[idx - 1].key);
+  const next = layoutState.laneRects.get(order[idx].key);
+  return yOffset + (prev.top + prev.height + next.top) / 2;
+}
+
+function endLaneDrag() {
+  window.removeEventListener('mousemove', onLaneDragMove);
+  window.removeEventListener('mouseup', endLaneDrag);
+  document.body.style.cursor = '';
+  dropIndicator.hidden = true;
+
+  const st = laneDragState;
+  laneDragState = null;
+  if (!st) return;
+
+  const handleEls = layoutState.handleEls?.get(st.laneKey) ?? [];
+  for (const el of handleEls) el.classList.remove('dragging');
+
+  const { fromIdx, dropIdx, groupSize } = st;
+  // A grouped gene drag occupies two adjacent insertion slots.
+  if (dropIdx === fromIdx || dropIdx === fromIdx + groupSize) {
+    hideAllHandles();
+    return;
+  }
+  const items = state.laneOrder.splice(fromIdx, groupSize);
+  const adjusted = dropIdx > fromIdx ? dropIdx - groupSize : dropIdx;
+  state.laneOrder.splice(adjusted, 0, ...items);
+  render();
+  hideAllHandles();
+}
