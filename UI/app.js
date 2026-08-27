@@ -42,8 +42,6 @@ const state = {
   colors: {
     gene: '#2e9f57',
     peak: '#3b82f6',
-    signalPositive: '#f49e4c',
-    signalNegative: '#78b4ff',
   },
   dataMin: 0,
   dataMax: 1,
@@ -254,6 +252,7 @@ function parseSignal(text, name) {
     // User-tunable display caps (null → auto). Set via the controls panel.
     viewPosMax: null,
     viewNegMax: null,
+    color: '#f49e4c',
   };
 }
 
@@ -707,12 +706,12 @@ function paintSignalLane(signal, laneLocalTop, viewWidth, scrollLeft, dataToCanv
     if (effPosMax > 0) {
       paintStepHist(posData, sMin, rangeMin, rangeMax, binBp,
         dataToCanvasX, centerY, -halfH / effPosMax, effPosMax,
-        hexToRgba(state.colors.signalPositive, 0.55), state.colors.signalPositive);
+        hexToRgba(signal.color, 0.55), signal.color);
     }
     if (negData && effNegMax > 0) {
       paintStepHist(negData, sMin, rangeMin, rangeMax, binBp,
         dataToCanvasX, centerY, halfH / effNegMax, effNegMax,
-        hexToRgba(state.colors.signalNegative, 0.55), state.colors.signalNegative);
+        hexToRgba(signal.color, 0.55), signal.color);
     }
   }
 
@@ -851,8 +850,25 @@ function buildSignalControls() {
       ));
     }
 
+    row.appendChild(makeSignalColorInput(signal));
+
     host.appendChild(row);
   }
+}
+
+function makeSignalColorInput(signal) {
+  const wrap = document.createElement('label');
+  wrap.className = 'color-control signal-color-control';
+  const input = document.createElement('input');
+  input.type = 'color';
+  input.value = signal.color;
+  input.title = `Change color for ${signal.name}`;
+  input.addEventListener('input', (event) => {
+    signal.color = event.target.value;
+    renderSignalsOnly();
+  });
+  wrap.appendChild(input);
+  return wrap;
 }
 
 function makeCapInput(signal, field, labelText, placeholder) {
@@ -946,8 +962,6 @@ document.getElementById('load-files').addEventListener('click', loadDataFromFile
 const colorInputs = [
   ['gene-color', 'gene'],
   ['peak-color', 'peak'],
-  ['signal-positive-color', 'signalPositive'],
-  ['signal-negative-color', 'signalNegative'],
 ];
 for (const [id, colorName] of colorInputs) {
   document.getElementById(id).addEventListener('input', (event) => {
