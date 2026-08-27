@@ -812,6 +812,13 @@ function buildSignalControls() {
   masterInput.min = '1';
   masterInput.step = '1';
   masterInput.placeholder = 'all lanes';
+  const masterValues = state.signals.map((signal) => signal.viewPosMax);
+  if (
+    masterValues.length > 0 &&
+    masterValues.every((value) => value != null && value === masterValues[0])
+  ) {
+    masterInput.value = masterValues[0];
+  }
   masterInput.addEventListener('input', () => {
     const raw = masterInput.value.trim();
     const v = raw === '' ? null : Math.max(1, Number(raw));
@@ -832,7 +839,11 @@ function buildSignalControls() {
 
   host.appendChild(headingRow);
 
-  for (const signal of state.signals) {
+  const orderedSignals = state.laneOrder
+    .filter((lane) => lane.kind === 'signal')
+    .map((lane) => state.signals[lane.index])
+    .filter(Boolean);
+  for (const signal of orderedSignals) {
     const row = document.createElement('div');
     row.className = 'signal-control-row';
 
@@ -881,6 +892,7 @@ function makeCapInput(signal, field, labelText, placeholder) {
   input.min = '1';
   input.step = '1';
   input.placeholder = placeholder;
+  if (signal[field] != null) input.value = signal[field];
   input.addEventListener('input', () => {
     const raw = input.value.trim();
     const v = raw === '' ? null : Math.max(1, Number(raw));
@@ -1446,5 +1458,6 @@ function endLaneDrag() {
   const adjusted = dropIdx > fromIdx ? dropIdx - groupSize : dropIdx;
   state.laneOrder.splice(adjusted, 0, ...items);
   render();
+  buildSignalControls();
   hideAllHandles();
 }
