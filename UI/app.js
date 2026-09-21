@@ -15,6 +15,8 @@
 const svg = document.getElementById('chart');
 const status = document.getElementById('status');
 const container = document.getElementById('chart-container');
+const viewerWindow = document.querySelector('.chart-card');
+const fullscreenToggle = document.getElementById('fullscreen-toggle');
 const signalCanvas = document.getElementById('signal-canvas');
 const signalCtx = signalCanvas.getContext('2d');
 const rulerOverlay = document.getElementById('ruler-overlay');
@@ -956,6 +958,55 @@ function resetView() {
   container.scrollLeft = 0;
 }
 
+function updateFullscreenButton() {
+  const isFullscreen = document.fullscreenElement === viewerWindow;
+  fullscreenToggle.textContent = isFullscreen ? 'Exit fullscreen' : 'Fullscreen';
+  fullscreenToggle.title = isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen';
+  fullscreenToggle.setAttribute('aria-pressed', String(isFullscreen));
+}
+
+function coordinateAtViewportCenter() {
+  const margin = layoutState.margin || { left: 24, right: 24 };
+  const width = totalWidthPx();
+  const plotWidth = Math.max(1, width - margin.left - margin.right);
+  const centerPx = container.scrollLeft + container.clientWidth / 2;
+  return state.dataMin + ((centerPx - margin.left) / plotWidth) *
+    (state.dataMax - state.dataMin);
+}
+
+function restoreFullscreenAnchor() {
+  const anchorCoord = fullscreenAnchorCoord ?? fullscreenCenterCoord;
+  if (anchorCoord == null || state.dataMax <= state.dataMin) return;
+
+  render();
+  const margin = layoutState.margin || { left: 24, right: 24 };
+  const width = totalWidthPx();
+  const plotWidth = Math.max(1, width - margin.left - margin.right);
+  const centerScroll =
+    margin.left + ((anchorCoord - state.dataMin) /
+      (state.dataMax - state.dataMin)) * plotWidth - container.clientWidth / 2;
+  const maxScroll = Math.max(0, width - container.clientWidth);
+  container.scrollLeft = Math.max(0, Math.min(maxScroll, centerScroll));
+  fullscreenCenterCoord = document.fullscreenElement === viewerWindow
+    ? anchorCoord
+    : null;
+  fullscreenAnchorCoord = null;
+}
+
+async function toggleFullscreen() {
+  try {
+    fullscreenAnchorCoord = coordinateAtViewportCenter();
+    fullscreenCenterCoord = fullscreenAnchorCoord;
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await viewerWindow.requestFullscreen();
+    }
+  } catch (err) {
+    status.textContent = `Fullscreen unavailable: ${err.message}`;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
@@ -963,6 +1014,14 @@ function resetView() {
 document.getElementById('zoom-in').addEventListener('click', () => zoomBy(ZOOM_STEP));
 document.getElementById('zoom-out').addEventListener('click', () => zoomBy(1 / ZOOM_STEP));
 document.getElementById('reset').addEventListener('click', resetView);
+fullscreenToggle.addEventListener('click', toggleFullscreen);
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement !== viewerWindow && fullscreenAnchorCoord == null) {
+    fullscreenAnchorCoord = fullscreenCenterCoord;
+  }
+  updateFullscreenButton();
+  requestAnimationFrame(restoreFullscreenAnchor);
+});
 document.getElementById('pan-left').addEventListener('click', () =>
   panByPixels(-container.clientWidth * 0.6),
 );
@@ -1004,6 +1063,9 @@ container.addEventListener(
 // Signal canvas repaints on scroll — rAF-throttled.
 let signalScrollRafId = 0;
 container.addEventListener('scroll', () => {
+  if (document.fullscreenElement === viewerWindow) {
+    fullscreenCenterCoord = coordinateAtViewportCenter();
+  }
   if (state.signals.length === 0) return;
   if (signalScrollRafId) return;
   signalScrollRafId = requestAnimationFrame(() => {
@@ -1064,6 +1126,8 @@ const selectionOverlay = document.getElementById('selection-overlay');
 let dragState = null;
 let rulerState = { active: false };
 let rulerDragState = null;
+let fullscreenAnchorCoord = null;
+let fullscreenCenterCoord = null;
 
 // Suppress browser context menu on the chart so right-click drag works.
 container.addEventListener('contextmenu', (event) => {
