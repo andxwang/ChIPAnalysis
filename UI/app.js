@@ -543,10 +543,28 @@ function syncLaneOrder() {
 // total height of the lane block (for sizing the plot).
 function computeLaneLayout(startY) {
   const laneRects = new Map();
+  const signalCount = state.laneOrder.filter((lane) => lane.kind === 'signal').length;
+  const minimumBlockHeight = state.laneOrder.reduce((total, lane, index) => {
+    const height = lane.kind === 'signal'
+      ? SIGNAL_LANE_HEIGHT
+      : LANE_HEIGHTS[lane.kind] ?? 20;
+    return total + height + (index > 0 ? LANE_GAP : 0);
+  }, 0);
+  const margin = { top: 24, bottom: 46 };
+  const availableBlockHeight = Math.max(
+    0,
+    container.clientHeight - margin.top - margin.bottom,
+  );
+  const extraSignalHeight = document.fullscreenElement === viewerWindow &&
+    signalCount > 0 && minimumBlockHeight <= availableBlockHeight
+    ? Math.floor((availableBlockHeight - minimumBlockHeight) / signalCount)
+    : 0;
   let y = startY;
   let first = true;
   for (const lane of state.laneOrder) {
-    const h = LANE_HEIGHTS[lane.kind] ?? 20;
+    const h = lane.kind === 'signal'
+      ? SIGNAL_LANE_HEIGHT + extraSignalHeight
+      : LANE_HEIGHTS[lane.kind] ?? 20;
     if (!first) y += LANE_GAP;
     laneRects.set(lane.key, {
       top: y,
@@ -635,7 +653,8 @@ function paintSignalCanvas() {
     const signal = state.signals[rect.index];
     if (!signal) continue;
     paintSignalLane(signal, rect.top - margin.top,
-      viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan);
+      rect.height, viewWidth, scrollLeft, dataToCanvasX,
+      margin, plotWidth, dataSpan);
   }
 
   // Sticky peak-lane labels, positioned at each peak lane's Y.
@@ -658,25 +677,26 @@ function signalCanvasHeight() {
   return layoutState.plotHeight || 0;
 }
 
-function paintSignalLane(signal, laneLocalTop, viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan) {
+function paintSignalLane(signal, laneLocalTop, laneHeight, viewWidth, scrollLeft,
+  dataToCanvasX, margin, plotWidth, dataSpan) {
   const {
     name, dataMin: sMin, dataMax: sMax,
     posData, negData, posMax, negMax,
     viewPosMax, viewNegMax,
   } = signal;
 
-  const centerY = laneLocalTop + SIGNAL_LANE_HEIGHT / 2;
-  const halfH = SIGNAL_LANE_HEIGHT / 2;
+  const centerY = laneLocalTop + laneHeight / 2;
+  const halfH = laneHeight / 2;
 
   // Background
   const bgLeft = Math.max(0, dataToCanvasX(state.dataMin));
   const bgRight = Math.min(viewWidth, dataToCanvasX(state.dataMax));
   if (bgRight > bgLeft) {
     signalCtx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-    signalCtx.fillRect(bgLeft, laneLocalTop, bgRight - bgLeft, SIGNAL_LANE_HEIGHT);
+    signalCtx.fillRect(bgLeft, laneLocalTop, bgRight - bgLeft, laneHeight);
     signalCtx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
     signalCtx.lineWidth = 1;
-    signalCtx.strokeRect(bgLeft, laneLocalTop, bgRight - bgLeft, SIGNAL_LANE_HEIGHT);
+    signalCtx.strokeRect(bgLeft, laneLocalTop, bgRight - bgLeft, laneHeight);
   }
 
   // Center axis
