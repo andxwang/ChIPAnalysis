@@ -15,6 +15,8 @@
 const svg = document.getElementById('chart');
 const status = document.getElementById('status');
 const container = document.getElementById('chart-container');
+const viewerWindow = document.querySelector('.chart-card');
+const fullscreenToggle = document.getElementById('fullscreen-toggle');
 const signalCanvas = document.getElementById('signal-canvas');
 const signalCtx = signalCanvas.getContext('2d');
 const rulerOverlay = document.getElementById('ruler-overlay');
@@ -541,10 +543,28 @@ function syncLaneOrder() {
 // total height of the lane block (for sizing the plot).
 function computeLaneLayout(startY) {
   const laneRects = new Map();
+  const signalCount = state.laneOrder.filter((lane) => lane.kind === 'signal').length;
+  const minimumBlockHeight = state.laneOrder.reduce((total, lane, index) => {
+    const height = lane.kind === 'signal'
+      ? SIGNAL_LANE_HEIGHT
+      : LANE_HEIGHTS[lane.kind] ?? 20;
+    return total + height + (index > 0 ? LANE_GAP : 0);
+  }, 0);
+  const margin = { top: 24, bottom: 46 };
+  const availableBlockHeight = Math.max(
+    0,
+    container.clientHeight - margin.top - margin.bottom,
+  );
+  const extraSignalHeight = document.fullscreenElement === viewerWindow &&
+    signalCount > 0 && minimumBlockHeight <= availableBlockHeight
+    ? Math.floor((availableBlockHeight - minimumBlockHeight) / signalCount)
+    : 0;
   let y = startY;
   let first = true;
   for (const lane of state.laneOrder) {
-    const h = LANE_HEIGHTS[lane.kind] ?? 20;
+    const h = lane.kind === 'signal'
+      ? SIGNAL_LANE_HEIGHT + extraSignalHeight
+      : LANE_HEIGHTS[lane.kind] ?? 20;
     if (!first) y += LANE_GAP;
     laneRects.set(lane.key, {
       top: y,
@@ -633,7 +653,8 @@ function paintSignalCanvas() {
     const signal = state.signals[rect.index];
     if (!signal) continue;
     paintSignalLane(signal, rect.top - margin.top,
-      viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan);
+      rect.height, viewWidth, scrollLeft, dataToCanvasX,
+      margin, plotWidth, dataSpan);
   }
 
   // Sticky peak-lane labels, positioned at each peak lane's Y.
@@ -656,25 +677,26 @@ function signalCanvasHeight() {
   return layoutState.plotHeight || 0;
 }
 
-function paintSignalLane(signal, laneLocalTop, viewWidth, scrollLeft, dataToCanvasX, margin, plotWidth, dataSpan) {
+function paintSignalLane(signal, laneLocalTop, laneHeight, viewWidth, scrollLeft,
+  dataToCanvasX, margin, plotWidth, dataSpan) {
   const {
     name, dataMin: sMin, dataMax: sMax,
     posData, negData, posMax, negMax,
     viewPosMax, viewNegMax,
   } = signal;
 
-  const centerY = laneLocalTop + SIGNAL_LANE_HEIGHT / 2;
-  const halfH = SIGNAL_LANE_HEIGHT / 2;
+  const centerY = laneLocalTop + laneHeight / 2;
+  const halfH = laneHeight / 2;
 
   // Background
   const bgLeft = Math.max(0, dataToCanvasX(state.dataMin));
   const bgRight = Math.min(viewWidth, dataToCanvasX(state.dataMax));
   if (bgRight > bgLeft) {
     signalCtx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-    signalCtx.fillRect(bgLeft, laneLocalTop, bgRight - bgLeft, SIGNAL_LANE_HEIGHT);
+    signalCtx.fillRect(bgLeft, laneLocalTop, bgRight - bgLeft, laneHeight);
     signalCtx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
     signalCtx.lineWidth = 1;
-    signalCtx.strokeRect(bgLeft, laneLocalTop, bgRight - bgLeft, SIGNAL_LANE_HEIGHT);
+    signalCtx.strokeRect(bgLeft, laneLocalTop, bgRight - bgLeft, laneHeight);
   }
 
   // Center axis
@@ -956,6 +978,55 @@ function resetView() {
   container.scrollLeft = 0;
 }
 
+function updateFullscreenButton() {
+  const isFullscreen = document.fullscreenElement === viewerWindow;
+  fullscreenToggle.textContent = isFullscreen ? 'Exit fullscreen' : 'Fullscreen';
+  fullscreenToggle.title = isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen';
+  fullscreenToggle.setAttribute('aria-pressed', String(isFullscreen));
+}
+
+function coordinateAtViewportCenter() {
+  const margin = layoutState.margin || { left: 24, right: 24 };
+  const width = totalWidthPx();
+  const plotWidth = Math.max(1, width - margin.left - margin.right);
+  const centerPx = container.scrollLeft + container.clientWidth / 2;
+  return state.dataMin + ((centerPx - margin.left) / plotWidth) *
+    (state.dataMax - state.dataMin);
+}
+
+function restoreFullscreenAnchor() {
+  const anchorCoord = fullscreenAnchorCoord ?? fullscreenCenterCoord;
+  if (anchorCoord == null || state.dataMax <= state.dataMin) return;
+
+  render();
+  const margin = layoutState.margin || { left: 24, right: 24 };
+  const width = totalWidthPx();
+  const plotWidth = Math.max(1, width - margin.left - margin.right);
+  const centerScroll =
+    margin.left + ((anchorCoord - state.dataMin) /
+      (state.dataMax - state.dataMin)) * plotWidth - container.clientWidth / 2;
+  const maxScroll = Math.max(0, width - container.clientWidth);
+  container.scrollLeft = Math.max(0, Math.min(maxScroll, centerScroll));
+  fullscreenCenterCoord = document.fullscreenElement === viewerWindow
+    ? anchorCoord
+    : null;
+  fullscreenAnchorCoord = null;
+}
+
+async function toggleFullscreen() {
+  try {
+    fullscreenAnchorCoord = coordinateAtViewportCenter();
+    fullscreenCenterCoord = fullscreenAnchorCoord;
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await viewerWindow.requestFullscreen();
+    }
+  } catch (err) {
+    status.textContent = `Fullscreen unavailable: ${err.message}`;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
@@ -963,6 +1034,14 @@ function resetView() {
 document.getElementById('zoom-in').addEventListener('click', () => zoomBy(ZOOM_STEP));
 document.getElementById('zoom-out').addEventListener('click', () => zoomBy(1 / ZOOM_STEP));
 document.getElementById('reset').addEventListener('click', resetView);
+fullscreenToggle.addEventListener('click', toggleFullscreen);
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement !== viewerWindow && fullscreenAnchorCoord == null) {
+    fullscreenAnchorCoord = fullscreenCenterCoord;
+  }
+  updateFullscreenButton();
+  requestAnimationFrame(restoreFullscreenAnchor);
+});
 document.getElementById('pan-left').addEventListener('click', () =>
   panByPixels(-container.clientWidth * 0.6),
 );
@@ -1004,6 +1083,9 @@ container.addEventListener(
 // Signal canvas repaints on scroll — rAF-throttled.
 let signalScrollRafId = 0;
 container.addEventListener('scroll', () => {
+  if (document.fullscreenElement === viewerWindow) {
+    fullscreenCenterCoord = coordinateAtViewportCenter();
+  }
   if (state.signals.length === 0) return;
   if (signalScrollRafId) return;
   signalScrollRafId = requestAnimationFrame(() => {
@@ -1064,6 +1146,8 @@ const selectionOverlay = document.getElementById('selection-overlay');
 let dragState = null;
 let rulerState = { active: false };
 let rulerDragState = null;
+let fullscreenAnchorCoord = null;
+let fullscreenCenterCoord = null;
 
 // Suppress browser context menu on the chart so right-click drag works.
 container.addEventListener('contextmenu', (event) => {
