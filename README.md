@@ -2,7 +2,7 @@
 
 First, install (keeping simple as of now): `pip install -r requirements.txt`. Needed for analysis, but not UI.
 
-Fill in the correct file paths in `config.json`. E.g.:
+Fill in the correct file paths in `config.json`. Also set **constants**. E.g.:
 
 ```json
 {
@@ -13,13 +13,13 @@ Fill in the correct file paths in `config.json`. E.g.:
   },
   "analysis": {
     "proximity": 600,
-    "operon_gap": 30
+    "location_edge_cutoff": 500
   }
 }
 ```
 
 - `proximity`: the maximum threshold of distance between a peak and gene to consider that peak to regulate that gene
-- `operon_gap`: maximum threshold of distance between two genes to consider them an operon
+- `location_edge_cutoff`: bp distance from boundary of gene to consider a peak at start/end of that gene
 
 EXAMPLE folder structure: in folder like this:
 

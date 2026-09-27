@@ -40,8 +40,16 @@ if __name__ == '__main__':
     peaks_gff_path = args.peaks or config.get('paths', {}).get('peaks')
     peaks_df = load_gff_data(peaks_gff_path)
 
+    proximity = config['analysis']['proximity']
+    location_edge_cutoff = config['analysis']['location_edge_cutoff']
+
     print("Running analysis:")
-    regulated_peaks = annotate_peaks(peaks_df, mab_df)
+    regulated_peaks = annotate_peaks(
+        peaks_df,
+        mab_df,
+        proximity=proximity,
+        location_edge_cutoff=location_edge_cutoff,
+    )
     print("Output preview:")
     print(regulated_peaks.head())
     

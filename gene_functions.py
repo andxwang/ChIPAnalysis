@@ -25,43 +25,61 @@ def build_gene_table(mab_df):
         "ends": genes["gene_end"].to_numpy(),
     }
 
-def is_intragenic(peak_start, peak_end, gene_start, gene_end):
-    return gene_start <= peak_start and peak_end <= gene_end
+def get_genetic_location(
+    peak_average,
+    genes,
+    location_edge_cutoff,
+):
+    """Classify a peak using the average of its start and end coordinates.
 
-
-def get_peak_location(peak_start, peak_end, genes):
-    containing = [
-        row
-        for _, row in genes.iterrows()
-        if is_intragenic(peak_start, peak_end, row["gene_start"], row["gene_end"])
+    Return the containing gene name, adding ``start of`` or ``end of`` when
+    the midpoint is within the corresponding third and configured cutoff.
+    Prefixes follow transcription direction, so they reverse for ``-`` genes.
+    Join names with ``/`` for overlapping genes or for the nearest flanking
+    genes; use ``-`` when an outside flank is absent.
+    """
+    containing = genes[
+        (genes["gene_start"] <= peak_average)
+        & (peak_average <= genes["gene_end"])
     ]
 
     if len(containing) == 1:
-        return f"{containing[0]['gene_name']} (intragenic)"
+        gene = containing.iloc[0]
+        gene_start = gene["gene_start"]
+        gene_end = gene["gene_end"]
+        gene_length = gene_end - gene_start
+        gene_name = gene["gene_name"]
+        start_cutoff = min(gene_length / 3, location_edge_cutoff)
 
-    overlapping = [
-        row
-        for _, row in genes.iterrows()
-        if max(peak_start, row["gene_start"]) <= min(peak_end, row["gene_end"])
-    ]
+        if gene["direction"] == "-":
+            if gene_end - peak_average < start_cutoff:
+                return f"start of {gene_name}"
+            if peak_average - gene_start < start_cutoff:
+                return f"end of {gene_name}"
+        else:
+            if peak_average - gene_start < start_cutoff:
+                return f"start of {gene_name}"
+            if gene_end - peak_average < start_cutoff:
+                return f"end of {gene_name}"
+        return gene_name
 
-    if len(overlapping) == 2:
-        return f"{overlapping[0]['gene_name']}/{overlapping[1]['gene_name']} (intergenic)"
+    if len(containing) > 1:
+        return "/".join(containing["gene_name"].astype(str))
 
-    left_candidates = genes[genes["gene_end"] < peak_start]
-    right_candidates = genes[genes["gene_start"] > peak_end]
+    left_candidates = genes[genes["gene_end"] < peak_average]
+    right_candidates = genes[genes["gene_start"] > peak_average]
 
     left_gene = left_candidates.iloc[-1]["gene_name"] if not left_candidates.empty else None
     right_gene = right_candidates.iloc[0]["gene_name"] if not right_candidates.empty else None
 
     if left_gene is not None and right_gene is not None:
-        return f"{left_gene}/{right_gene} (intergenic)"
+        return f"{left_gene}/{right_gene}"
 
     if left_gene is not None:
-        return f"{left_gene}/ - (intergenic)"
+        return f"{left_gene}/-"
 
     if right_gene is not None:
-        return f"-/ {right_gene} (intergenic)"
+        return f"-/{right_gene}"
 
     return "-"
 
@@ -148,106 +166,13 @@ def find_regulated_genes(peak_start, peak_end, gene_table, proximity=600):
     return "-" if not candidates else "/".join(candidates)
 
 
-def find_operon(peak_start, peak_end, genes, operon_gap=100, proximity=600):
-    """
-    Return the operon associated with a peak.
-
-    An operon is a chain of >=2 adjacent genes where every neighboring pair:
-      - is separated by <= operon_gap coordinates
-      - has the same direction
-
-    A peak can identify an operon either by:
-      - directly overlapping a gene, or
-      - being within `proximity` of a gene boundary in the gene's
-        transcriptional direction.
-
-    Returns
-    -------
-    str
-        "<first gene> - <last gene>" if an operon is found,
-        otherwise "-".
-    """
-
-    def expand_operon(idx):
-        """Expand from a seed gene index in both directions."""
-        cluster = [idx]
-        direction = genes.iloc[idx]["direction"]
-
-        # Expand left
-        left = idx
-        while left > 0:
-            prev = genes.iloc[left - 1]
-            curr = genes.iloc[left]
-
-            gap = curr["gene_start"] - prev["gene_end"]
-
-            if gap <= operon_gap and prev["direction"] == direction:
-                cluster.insert(0, left - 1)
-                left -= 1
-            else:
-                break
-
-        # Expand right
-        right = idx
-        while right < len(genes) - 1:
-            curr = genes.iloc[right]
-            nxt = genes.iloc[right + 1]
-
-            gap = nxt["gene_start"] - curr["gene_end"]
-
-            if gap <= operon_gap and nxt["direction"] == direction:
-                cluster.append(right + 1)
-                right += 1
-            else:
-                break
-
-        return cluster if len(cluster) >= 2 else []
-
-    # First: direct overlap
-    overlapping = genes[
-        (genes["gene_start"] <= peak_end) &
-        (genes["gene_end"] >= peak_start)
-    ]
-
-    seed_indices = list(overlapping.index)
-
-    # need to do this even if no overlap
-    # Candidate genes near the peak boundaries
-    candidates = genes[
-        (abs(genes["gene_start"] - peak_start) <= proximity) |
-        (abs(genes["gene_end"] - peak_end) <= proximity)
-    ]
-
-    # Apply strand-specific regulatory boundary logic
-    for idx, gene in candidates.iterrows():
-        if gene["direction"] == "+":
-            if abs(peak_start - gene["gene_start"]) <= proximity:
-                seed_indices.append(idx)
-
-        elif gene["direction"] == "-":
-            if abs(peak_end - gene["gene_end"]) <= proximity:
-                seed_indices.append(idx)
-
-    if not seed_indices:
-        return "-"
-
-    operon_indices = set()
-
-    for idx in seed_indices:
-        cluster = expand_operon(idx)
-        operon_indices.update(cluster)
-
-    if not operon_indices:
-        return "-"
-
-    operon_indices = sorted(operon_indices)
-    first_gene = genes.iloc[operon_indices[0]]["gene_name"]
-    last_gene = genes.iloc[operon_indices[-1]]["gene_name"]
-
-    return f"{first_gene} - {last_gene}"
-
-
-def annotate_peaks(peaks_df, mab_df, proximity=600, operon_gap=30):
+def annotate_peaks(
+    peaks_df,
+    mab_df,
+    proximity=600,
+    *,
+    location_edge_cutoff,
+):
     gene_table = build_gene_table(mab_df)
     genes = gene_table["genes"]
 
@@ -255,9 +180,11 @@ def annotate_peaks(peaks_df, mab_df, proximity=600, operon_gap=30):
     result.columns = ["P1", "P2", "Score"]
     result["Paverage"] = (result["P1"] + result["P2"]) / 2
     
-    tqdm.pandas(desc="Finding peak locations")
-    result["Peak Location"] = result.progress_apply(
-        lambda row: get_peak_location(row["P1"], row["P2"], genes),
+    tqdm.pandas(desc="Finding genetic locations")
+    result["Genetic Location"] = result.progress_apply(
+        lambda row: get_genetic_location(
+            row["Paverage"], genes, location_edge_cutoff=location_edge_cutoff
+        ),
         axis=1,
     )
     
@@ -268,11 +195,4 @@ def annotate_peaks(peaks_df, mab_df, proximity=600, operon_gap=30):
     )
     result['comments'] = pd.qcut(result['Score'], q=5, labels=['no real peak', 'small', 'medium', 'large', 'very large'])
     
-    tqdm.pandas(desc=f"Finding operons with operon_gap={operon_gap}")
-    result["Operon"] = result.progress_apply(
-        lambda row: find_operon(
-            row["P1"], row["P2"], genes, operon_gap=operon_gap
-        ),
-        axis=1,
-    )
-    return result
+    return result.drop(columns=["P1", "P2"])

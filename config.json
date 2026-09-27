@@ -6,6 +6,6 @@
   },
   "analysis": {
     "proximity": 600,
-    "operon_gap": 30
+    "location_edge_cutoff": 500
   }
 }
