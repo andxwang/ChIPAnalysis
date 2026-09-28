@@ -193,7 +193,6 @@ def annotate_peaks(
         lambda row: find_regulated_genes(row["P1"], row["P2"], gene_table, proximity=proximity),
         axis=1,
     )
-    result['comments'] = pd.qcut(result['Score'], q=5, labels=['no real peak', 'small', 'medium', 'large', 'very large'])
 
     result['Coordinates'] = result.apply(lambda r: f"{r['P1']}_{r['P2']}", axis=1)
     result.drop(columns=['P1', 'P2', 'Paverage'], inplace=True)
