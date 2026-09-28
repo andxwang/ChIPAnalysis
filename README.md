@@ -2,7 +2,51 @@
 
 First, install (keeping simple as of now): `pip install -r requirements.txt`. Needed for analysis, but not UI.
 
-Fill in the correct file paths in `config.json`. Also set **constants**. E.g.:
+## How to run analysis: set file paths and constants (see below) by using command line arguments OR filling in config.
+
+### Option 1: Command line:
+
+```sh
+python3 main.py --help
+```
+will show 
+
+```sh
+usage: main.py [-h] [-c CONFIG] [-g GENES] [-p PEAKS] [-o OUTPUT] [--proximity PROXIMITY] [--location-edge-cutoff LOCATION_EDGE_CUTOFF]
+
+Main script to annotate ChIP-seq peaks.
+
+options:
+  -h, --help            show this help message and exit
+  -c CONFIG, --config CONFIG
+                        Path to configuration JSON file (default: config.json)
+  -g GENES, --genes GENES
+                        Path to gene annotation GFF file
+  -p PEAKS, --peaks PEAKS
+                        Path to peaks GFF file
+  -o OUTPUT, --output OUTPUT
+                        Output CSV filename
+  --proximity PROXIMITY
+                        maximum threshold of distance between a peak and gene to consider that peak to regulate that gene (overrides config)
+  --location-edge-cutoff LOCATION_EDGE_CUTOFF
+                        bp distance from boundary of gene to consider a peak at start/end of that gene (overrides config)
+```
+
+Example command:
+
+```bash
+python3 main.py 
+  -g ~/Documents/ChIPAnalysis/MabATCC19977_gff.gff 
+  -p ~/Documents/ChIPAnalysis/SigHP1/SigHP1_FDR0.01combo.gff 
+  -o ~/Documents/ChIPAnalysis/regulated_peaks_out.csv
+  --proximity 600 
+  --location-edge-cutoff 500
+```
+
+
+### Option 2: use config.json
+
+Fill in the correct file paths in `config.json`. Also set **constants**. Then run `python main.py`. E.g.:
 
 ```json
 {
@@ -21,27 +65,6 @@ Fill in the correct file paths in `config.json`. Also set **constants**. E.g.:
 - `proximity`: the maximum threshold of distance between a peak and gene to consider that peak to regulate that gene
 - `location_edge_cutoff`: bp distance from boundary of gene to consider a peak at start/end of that gene
 
-EXAMPLE folder structure: in folder like this:
-
-```
-ChIPAnalysis/
-│   config.json  <-- fill in paths here if different
-│   MabATCC19977_gff.gff
-├───SigHP1
-│       SigHP1_FDR0.01combo.gff
-├───SigHP2
-│       SigHP2_FDR0.01combo.gff
-```
-
-## To run the analysis:
-```bash
-cd ChIPAnalysis/
-python main.py
-```
-
-Which will save the output to the output path you specified in `config.json`.
-
-You can also use cli arguments if you're familiar: `python main.py --help`
 
 ## To run the UI page:
 ```sh

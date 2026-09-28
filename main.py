@@ -28,6 +28,16 @@ if __name__ == '__main__':
     parser.add_argument("-g", "--genes", help="Path to gene annotation GFF file")
     parser.add_argument("-p", "--peaks", help="Path to peaks GFF file")
     parser.add_argument("-o", "--output", help="Output CSV filename")
+    parser.add_argument(
+        "--proximity",
+        type=int,
+        help="maximum threshold of distance between a peak and gene to consider that peak to regulate that gene (overrides config)",
+    )
+    parser.add_argument(
+        "--location-edge-cutoff",
+        type=int,
+        help="bp distance from boundary of gene to consider a peak at start/end of that gene (overrides config)",
+    )
     args = parser.parse_args()
     
     config_path = args.config
@@ -40,8 +50,14 @@ if __name__ == '__main__':
     peaks_gff_path = args.peaks or config.get('paths', {}).get('peaks')
     peaks_df = load_gff_data(peaks_gff_path)
 
-    proximity = config['analysis']['proximity']
-    location_edge_cutoff = config['analysis']['location_edge_cutoff']
+    proximity = (
+        args.proximity if args.proximity is not None
+        else config['analysis']['proximity']
+    )
+    location_edge_cutoff = (
+        args.location_edge_cutoff if args.location_edge_cutoff is not None
+        else config['analysis']['location_edge_cutoff']
+    )
 
     print("Running analysis:")
     regulated_peaks = annotate_peaks(
