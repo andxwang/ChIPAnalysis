@@ -21,8 +21,6 @@ def build_gene_table(mab_df):
 
     return {
         "genes": genes,
-        "starts": genes["gene_start"].to_numpy(),
-        "ends": genes["gene_end"].to_numpy(),
     }
 
 def get_genetic_location(
@@ -83,85 +81,36 @@ def get_genetic_location(
 
     return "-"
 
-def is_in_first_third(peak_start, peak_end, gene_start, gene_end):
-    if peak_end <= gene_start:
-        return False
-    if peak_start >= gene_end:
-        return False
-
-    gene_length = gene_end - gene_start
-    if gene_length <= 0:
-        return False
-
-    first_third_end = gene_start + (gene_length / 3)
-    overlap_start = max(peak_start, gene_start)
-    overlap_end = min(peak_end, gene_end)
-
-    return overlap_end > overlap_start and overlap_start < first_third_end
-
-
-def is_in_last_third(peak_start, peak_end, gene_start, gene_end):
-    if peak_start >= gene_end:
-        return False
-    if peak_end <= gene_start:
-        return False
-
-    gene_length = gene_end - gene_start
-    if gene_length <= 0:
-        return False
-
-    last_third_start = gene_end - (gene_length / 3)
-    overlap_start = max(peak_start, gene_start)
-    overlap_end = min(peak_end, gene_end)
-
-    return overlap_end > overlap_start and overlap_end > last_third_start
-
-
-def is_regulating_gene(peak_start, peak_end, gene_row, proximity=600):
-    direction = gene_row["direction"]
-    gene_start = gene_row["gene_start"]
-    gene_end = gene_row["gene_end"]
-
-    if direction == "+":
-        in_first_third = is_in_first_third(peak_start, peak_end, gene_start, gene_end)
-        near_left_boundary = abs(peak_start - gene_start) <= proximity
-        return in_first_third or (near_left_boundary and peak_end <= gene_start)
-
-    if direction == "-":
-        in_last_third = is_in_last_third(peak_start, peak_end, gene_start, gene_end)
-        near_right_boundary = abs(peak_end - gene_end) <= proximity
-        return in_last_third or (near_right_boundary and peak_start >= gene_end)
-
-    return False
-
-
-def find_regulated_genes(peak_start, peak_end, gene_table, proximity=600):
+def find_regulated_genes(
+    peak_average,
+    gene_table,
+    forward_proximity=700,
+    antisense_proximity=300,
+):
+    """
+    - If the peak average (Pavg) lies completely within the boundaries of a gene X, it does regulate that gene X.
+    - Additionally (independently of the first point), if Pavg is within 700 bp (or the int set by the const `forward_proximity`) of the **beginning** of a gene Y, then it regulates that gene Y.
+    - Also to be applied independently: if Pavg is within 300 bp (or the const `antisense_proximity`) of the **end** of a gene Z, then it regulates that gene Z.
+    Note that "beginning" is different for a gene in the + vs - direction. For + direction, it means leftmost (smaller) coordinate. For - direction, it is the opposite. Same deal for "end" of a gene.
+    """
     genes = gene_table["genes"]
-    starts = gene_table["starts"]
-    ends = gene_table["ends"]
+    starts = genes["gene_start"].to_numpy()
+    ends = genes["gene_end"].to_numpy()
+    directions = genes["direction"].to_numpy()
 
-    candidate_indices = set()
+    inside_gene = (starts <= peak_average) & (peak_average <= ends)
+    near_beginning = (
+        ((directions == "+") & (starts > peak_average) & (starts - peak_average <= forward_proximity))
+        | ((directions == "-") & (ends < peak_average) & (peak_average - ends <= forward_proximity))
+    )
+    near_end = (
+        ((directions == "+") & (ends < peak_average) & (peak_average - ends <= antisense_proximity))
+        | ((directions == "-") & (starts > peak_average) & (starts - peak_average <= antisense_proximity))
+    )
 
-    # Genes whose start is close enough to possibly satisfy overlap or + strand proximity.
-    left = np.searchsorted(starts, peak_start - proximity, side="left")
-    right = np.searchsorted(starts, peak_end + proximity, side="right")
-    candidate_indices.update(range(left, right))
-
-    # Genes whose end is close enough to possibly satisfy overlap or - strand proximity.
-    left = np.searchsorted(ends, peak_start - proximity, side="left")
-    right = np.searchsorted(ends, peak_end + proximity, side="right")
-    candidate_indices.update(range(left, right))
-
-    candidates = [
-        genes.iloc[i]["gene_name"]
-        for i in sorted(candidate_indices)
-        if is_regulating_gene(
-            peak_start,
-            peak_end,
-            genes.iloc[i],
-            proximity=proximity,
-        )
-    ]
+    candidates = genes.loc[
+        inside_gene | near_beginning | near_end, "gene_name"
+    ].astype(str).tolist()
 
     return "-" if not candidates else "/".join(candidates)
 
@@ -169,7 +118,8 @@ def find_regulated_genes(peak_start, peak_end, gene_table, proximity=600):
 def annotate_peaks(
     peaks_df,
     mab_df,
-    proximity=600,
+    forward_proximity=700,
+    antisense_proximity=300,
     *,
     location_edge_cutoff,
 ):
@@ -188,9 +138,19 @@ def annotate_peaks(
         axis=1,
     )
     
-    tqdm.pandas(desc=f"Finding regulated genes with proximity={proximity}")
+    tqdm.pandas(
+        desc=(
+            f"Finding regulated genes with forward_proximity={forward_proximity}, "
+            f"antisense_proximity={antisense_proximity}"
+        )
+    )
     result["Gene(s) Regulated"] = result.progress_apply(
-        lambda row: find_regulated_genes(row["P1"], row["P2"], gene_table, proximity=proximity),
+        lambda row: find_regulated_genes(
+            row["Paverage"],
+            gene_table,
+            forward_proximity=forward_proximity,
+            antisense_proximity=antisense_proximity,
+        ),
         axis=1,
     )
 

@@ -11,8 +11,8 @@ python3 main.py --help
 ```
 will show 
 
-```sh
-usage: main.py [-h] [-c CONFIG] [-g GENES] [-p PEAKS] [-o OUTPUT] [--proximity PROXIMITY] [--location-edge-cutoff LOCATION_EDGE_CUTOFF]
+```
+usage: main.py [-h] [-c CONFIG] [-g GENES] [-p PEAKS] [-o OUTPUT] [--forward-proximity FORWARD_PROXIMITY] [--antisense-proximity ANTISENSE_PROXIMITY] [--location-edge-cutoff LOCATION_EDGE_CUTOFF]
 
 Main script to annotate ChIP-seq peaks.
 
@@ -26,8 +26,10 @@ options:
                         Path to peaks GFF file
   -o OUTPUT, --output OUTPUT
                         Output CSV filename
-  --proximity PROXIMITY
-                        maximum threshold of distance between a peak and gene to consider that peak to regulate that gene (overrides config)
+  --forward-proximity FORWARD_PROXIMITY
+                        maximum distance to a gene's beginning (overrides config)
+  --antisense-proximity ANTISENSE_PROXIMITY
+                        maximum distance from a gene's end for antisense regulation (overrides config)
   --location-edge-cutoff LOCATION_EDGE_CUTOFF
                         bp distance from boundary of gene to consider a peak at start/end of that gene (overrides config)
 ```
@@ -39,7 +41,8 @@ python3 main.py
   -g ~/Documents/ChIPAnalysis/MabATCC19977_gff.gff 
   -p ~/Documents/ChIPAnalysis/SigHP1/SigHP1_FDR0.01combo.gff 
   -o ~/Documents/ChIPAnalysis/regulated_peaks_out.csv
-  --proximity 600 
+  --forward-proximity 700
+  --antisense-proximity 300
   --location-edge-cutoff 500
 ```
 
@@ -56,13 +59,15 @@ Fill in the correct file paths in `config.json`. Also set **constants**. Then ru
     "output_path": "~/Documents/ChIPAnalysis/regulated_peaks_out.csv"
   },
   "analysis": {
-    "proximity": 600,
+    "forward_proximity": 700,
+    "antisense_proximity": 300,
     "location_edge_cutoff": 500
   }
 }
 ```
 
-- `proximity`: the maximum threshold of distance between a peak and gene to consider that peak to regulate that gene
+- `forward_proximity`: the maximum distance to a gene's beginning
+- `antisense_proximity`: the maximum distance from a gene's end for antisense regulation
 - `location_edge_cutoff`: bp distance from boundary of gene to consider a peak at start/end of that gene
 
 

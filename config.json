@@ -5,7 +5,8 @@
     "output_path": "~/Documents/ChIPAnalysis/regulated_peaks_out.csv"
   },
   "analysis": {
-    "proximity": 600,
+    "forward_proximity": 700,
+    "antisense_proximity": 300,
     "location_edge_cutoff": 500
   }
 }

@@ -29,9 +29,14 @@ if __name__ == '__main__':
     parser.add_argument("-p", "--peaks", help="Path to peaks GFF file")
     parser.add_argument("-o", "--output", help="Output CSV filename")
     parser.add_argument(
-        "--proximity",
+        "--forward-proximity",
         type=int,
-        help="maximum threshold of distance between a peak and gene to consider that peak to regulate that gene (overrides config)",
+        help="maximum distance to a gene's beginning (overrides config)",
+    )
+    parser.add_argument(
+        "--antisense-proximity",
+        type=int,
+        help="maximum distance from a gene's end for antisense regulation (overrides config)",
     )
     parser.add_argument(
         "--location-edge-cutoff",
@@ -50,9 +55,13 @@ if __name__ == '__main__':
     peaks_gff_path = args.peaks or config.get('paths', {}).get('peaks')
     peaks_df = load_gff_data(peaks_gff_path)
 
-    proximity = (
-        args.proximity if args.proximity is not None
-        else config['analysis']['proximity']
+    forward_proximity = (
+        args.forward_proximity if args.forward_proximity is not None
+        else config['analysis']['forward_proximity']
+    )
+    antisense_proximity = (
+        args.antisense_proximity if args.antisense_proximity is not None
+        else config['analysis'].get('antisense_proximity', 300)
     )
     location_edge_cutoff = (
         args.location_edge_cutoff if args.location_edge_cutoff is not None
@@ -63,7 +72,8 @@ if __name__ == '__main__':
     regulated_peaks = annotate_peaks(
         peaks_df,
         mab_df,
-        proximity=proximity,
+        forward_proximity=forward_proximity,
+        antisense_proximity=antisense_proximity,
         location_edge_cutoff=location_edge_cutoff,
     )
     print("Output preview:")
