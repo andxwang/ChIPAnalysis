@@ -243,6 +243,33 @@ button.primary:hover {
   overscroll-behavior-x: contain;
 }
 
+.chart-scroll.background-off {
+  background: #fff;
+}
+
+.chart-scroll.background-off .axis-label,
+.chart-scroll.background-off .tick-label {
+  fill: #202124;
+}
+
+.chart-scroll.background-off .signal-label {
+  stroke: #fff;
+}
+
+.chart-scroll.background-off .signal-lane-bg {
+  fill: rgba(0, 0, 0, 0.025);
+  stroke: rgba(0, 0, 0, 0.16);
+}
+
+.chart-scroll.background-off .signal-axis,
+.chart-scroll.background-off .axis-line {
+  stroke: rgba(0, 0, 0, 0.38);
+}
+
+.chart-scroll.background-off .grid-line {
+  stroke: rgba(0, 0, 0, 0.09);
+}
+
 .chart-scroll:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -505,6 +532,21 @@ svg#chart {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border);
   border-radius: 12px;
+}
+
+.viewer-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.viewer-option input {
+  accent-color: var(--accent);
 }
 
 .color-control {

@@ -1034,6 +1034,9 @@ async function toggleFullscreen() {
 document.getElementById('zoom-in').addEventListener('click', () => zoomBy(ZOOM_STEP));
 document.getElementById('zoom-out').addEventListener('click', () => zoomBy(1 / ZOOM_STEP));
 document.getElementById('reset').addEventListener('click', resetView);
+document.getElementById('chart-background-toggle').addEventListener('change', (event) => {
+  container.classList.toggle('background-off', !event.target.checked);
+});
 fullscreenToggle.addEventListener('click', toggleFullscreen);
 document.addEventListener('fullscreenchange', () => {
   if (document.fullscreenElement !== viewerWindow && fullscreenAnchorCoord == null) {
