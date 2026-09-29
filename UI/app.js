@@ -173,7 +173,8 @@ function parseGenes(text) {
       const end = Number(cols[4]);
       const direction = cols[6] === '-' ? '-' : '+';
       const name = extractName(cols[8] || '');
-      return { start, end, direction, name };
+      const product = extractProduct(cols[8] || '');
+      return { start, end, direction, name, product };
     })
     .filter((row) => Number.isFinite(row.start) && Number.isFinite(row.end));
 }
@@ -261,6 +262,11 @@ function parseSignal(text, name) {
 function extractName(attr) {
   const match = attr.match(/name=([^;"]+)/i);
   return match ? match[1].trim() : 'unknown';
+}
+
+function extractProduct(attr) {
+  const match = attr.match(/(?:^|;)product=(.*?)(?:;|$)/i);
+  return match ? match[1].trim().replace(/^"+|"+$/g, '') : '';
 }
 
 function computeDataExtent(genes, peaks, signals = []) {
@@ -453,6 +459,7 @@ function render() {
     const title = svgEl('title');
     title.textContent =
       `${gene.name}\nStrand: ${gene.direction}\n` +
+      `Product: ${gene.product || 'unknown'}\n` +
       `${gene.start.toLocaleString()}\u2013${gene.end.toLocaleString()} bp ` +
       `(${(gene.end - gene.start + 1).toLocaleString()} bp)`;
     group.appendChild(title);
